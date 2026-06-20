@@ -14,6 +14,8 @@ Reverse-engineered logic (TRANSACTION sheet එකෙන් verify කරපු)
 """
 from __future__ import annotations
 
+import datetime as dt
+
 import pandas as pd
 
 import schema
@@ -27,6 +29,77 @@ def _f(x, default=0.0) -> float:
         return float(str(x).replace(",", ""))
     except (ValueError, TypeError):
         return default
+
+
+def _to_date(x):
+    """ISO string / date / Excel-serial -> datetime.date (බැරිනම් None)."""
+    if isinstance(x, dt.date):
+        return x
+    s = str(x).strip()
+    if not s:
+        return None
+    # Excel serial number?
+    try:
+        if s.replace(".", "", 1).isdigit() and float(s) > 30000:
+            return (dt.date(1899, 12, 30) + dt.timedelta(days=int(float(s))))
+    except (ValueError, TypeError):
+        pass
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d"):
+        try:
+            return dt.datetime.strptime(s[:10], fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _week_key(d: dt.date) -> str:
+    """ISO week label, උදා '2026-W25'."""
+    y, w, _ = d.isocalendar()
+    return f"{y}-W{w:02d}"
+
+
+def scheduled_hours(date_val, holidays: set | None = None) -> float:
+    """
+    දවසකට නියමිත working hours.
+      සතියේ දවස් 8h · සෙනසුරාදා 5h · ඉරිදා 0h · admin නිවාඩු 0h
+    """
+    d = _to_date(date_val)
+    if d is None:
+        return 8.0
+    if holidays and d.isoformat() in holidays:
+        return 0.0
+    return float(schema.WORKDAY_HOURS.get(d.weekday(), 8))
+
+
+def is_rest_day(date_val, holidays: set | None = None) -> bool:
+    """ඉරිදා හෝ admin නිවාඩු දවසක්ද?"""
+    return scheduled_hours(date_val, holidays) <= 0
+
+
+def holiday_set(holiday_df: pd.DataFrame) -> set:
+    """HOLIDAY-M -> {ISO date strings}."""
+    out = set()
+    if holiday_df is None or holiday_df.empty or "DATE" not in holiday_df:
+        return out
+    for v in holiday_df["DATE"]:
+        d = _to_date(v)
+        if d:
+            out.add(d.isoformat())
+    return out
+
+
+def attendance_needs_approval(working_hrs, date_val, holidays: set | None = None):
+    """
+    Attendance entry එකකට approval ඕනේද? (reason එකත් එක්ක)
+    return: (needs: bool, reason: str)
+    """
+    reasons = []
+    if _f(working_hrs) > schema.WORKING_HRS_CAP:
+        reasons.append(f"WORKING HRS {_f(working_hrs):.1f} > {schema.WORKING_HRS_CAP} cap")
+    if is_rest_day(date_val, holidays):
+        reasons.append("නිවාඩු/ඉරිදා දවසට attendance")
+    return (len(reasons) > 0, " ; ".join(reasons))
+
 
 
 def build_tcode_lookup(tcode_df: pd.DataFrame) -> dict:
@@ -139,15 +212,132 @@ def compute_incentive(
         name = u.get("USER NAME", "")
         ti = round(txn_inc.get(uid, 0.0), 2)
         ncomp = complaints.get(uid, 0)
+        penalty = ncomp * schema.COMPLAINT_PENALTY          # complaint -> අඩු කරනවා
         zero_bonus = schema.ZERO_COMPLAINT_BONUS if ncomp == 0 else 0
         kpi_bonus = schema.ONTIME_KPI_BONUS if ontime.get(uid, 0) > 0 else 0
         otr = _f(ot_recovery.get(uid))
         ot_bonus = schema.FULL_OT_RECOVERY_BONUS if otr >= 100 else 0
-        total = round(ti + zero_bonus + kpi_bonus + ot_bonus, 2)
+        total = round(ti + zero_bonus + kpi_bonus + ot_bonus - penalty, 2)
+        total = max(total, 0.0)                             # 0 ට වඩා අඩු වෙන්නෑ
         rows.append([
-            period_label, uid, name, ti, ncomp, zero_bonus, kpi_bonus,
+            period_label, uid, name, ti, ncomp, penalty, zero_bonus, kpi_bonus,
             otr, ot_bonus, total, schema.DEFAULT_TARGET,
             round(schema.DEFAULT_TARGET - total, 2), "",
         ])
 
     return pd.DataFrame(rows, columns=schema.SHEETS["INSENTIVE"]["headers"])
+
+
+# ═══════════════════════════ AUDIT engine ═══════════════════════════
+def audit_working_hours_cap(att_df: pd.DataFrame) -> pd.DataFrame:
+    """පැය 20+ වැඩ කරලා, approval නැති (OK/Pending/Rejected) attendance rows."""
+    if att_df.empty or "# OF WORKING HRS" not in att_df:
+        return pd.DataFrame()
+    df = att_df.copy()
+    df["_wh"] = df["# OF WORKING HRS"].apply(_f)
+    status = df.get("APPROVAL STATUS", pd.Series([""] * len(df)))
+    mask = (df["_wh"] > schema.WORKING_HRS_CAP) & \
+           (status.astype(str).str.upper() != schema.APPR_APPROVED)
+    out = df[mask].drop(columns=["_wh"])
+    return out
+
+
+def audit_holiday_attendance(att_df: pd.DataFrame, holidays: set) -> pd.DataFrame:
+    """නිවාඩු/ඉරිදා දවසට attendance තියෙන, approve කරලා නැති rows."""
+    if att_df.empty or "DATE" not in att_df:
+        return pd.DataFrame()
+    df = att_df.copy()
+    df["_rest"] = df["DATE"].apply(lambda d: is_rest_day(d, holidays))
+    status = df.get("APPROVAL STATUS", pd.Series([""] * len(df)))
+    mask = df["_rest"] & (status.astype(str).str.upper() != schema.APPR_APPROVED)
+    return df[mask].drop(columns=["_rest"])
+
+
+def audit_ot_without_transaction(att_df: pd.DataFrame, txn_df: pd.DataFrame,
+                                 holidays: set) -> pd.DataFrame:
+    """
+    Scheduled time එකට වඩා වැඩ කරලා (OT), නමුත් ඒ user+date එකට
+    TRANSACTION එකේ OT-N/OT-D එකක් නැති rows.
+    """
+    if att_df.empty:
+        return pd.DataFrame()
+
+    # OT transactions තියෙන (user, date) keys
+    ot_keys = set()
+    if not txn_df.empty and {"USER ID", "DATE", "TIME"} <= set(txn_df.columns):
+        for _, t in txn_df.iterrows():
+            tt = str(t.get("TIME", "")).upper().replace(" ", "")
+            if tt in ("OT-N", "OT-D", "OTN", "OTD"):
+                d = _to_date(t.get("DATE"))
+                ot_keys.add((str(t.get("USER ID", "")).strip(), d.isoformat() if d else ""))
+
+    flagged = []
+    for _, a in att_df.iterrows():
+        wh = _f(a.get("# OF WORKING HRS"))
+        ot_h = _f(a.get("# OF OT HRS"))
+        d = _to_date(a.get("DATE"))
+        sched = scheduled_hours(a.get("DATE"), holidays)
+        did_ot = (ot_h > 0) or (wh > sched)
+        if not did_ot:
+            continue
+        key = (str(a.get("USER ID", "")).strip(), d.isoformat() if d else "")
+        if key not in ot_keys:
+            row = a.to_dict()
+            row["EXTRA HRS"] = round(max(wh - sched, ot_h), 2)
+            row["ISSUE"] = "OT වැඩ කරලා OT-N/OT-D transaction නෑ"
+            flagged.append(row)
+    return pd.DataFrame(flagged)
+
+
+def audit_weekly_ot(att_df: pd.DataFrame) -> pd.DataFrame:
+    """සතියකට OT පැය 15+ ගිය user-week combinations."""
+    if att_df.empty or "# OF OT HRS" not in att_df:
+        return pd.DataFrame()
+    recs = []
+    for _, a in att_df.iterrows():
+        d = _to_date(a.get("DATE"))
+        if d is None:
+            continue
+        recs.append({
+            "USER ID": str(a.get("USER ID", "")).strip(),
+            "USER NAME": a.get("USER NAME", ""),
+            "WEEK": _week_key(d),
+            "OT": _f(a.get("# OF OT HRS")),
+        })
+    if not recs:
+        return pd.DataFrame()
+    g = pd.DataFrame(recs).groupby(
+        ["USER ID", "USER NAME", "WEEK"], as_index=False)["OT"].sum()
+    g = g.rename(columns={"OT": "WEEKLY OT HRS"})
+    return g[g["WEEKLY OT HRS"] > schema.WEEKLY_OT_CAP].sort_values(
+        "WEEKLY OT HRS", ascending=False)
+
+
+def audit_missing_transactions(user_df: pd.DataFrame, txn_df: pd.DataFrame,
+                               date_val) -> pd.DataFrame:
+    """අදාළ දිනයට TRANSACTION එකක් add කරලා නැති active users."""
+    if user_df.empty:
+        return pd.DataFrame()
+    d = _to_date(date_val)
+    diso = d.isoformat() if d else str(date_val)
+
+    submitted = set()
+    if not txn_df.empty and {"USER ID", "DATE"} <= set(txn_df.columns):
+        for _, t in txn_df.iterrows():
+            td = _to_date(t.get("DATE"))
+            if td and td.isoformat() == diso:
+                submitted.add(str(t.get("USER ID", "")).strip())
+
+    rows = []
+    for _, u in user_df.iterrows():
+        uid = str(u.get("USER ID", "")).strip()
+        if not uid:
+            continue
+        active = str(u.get("ACTIVE", "Y")).strip().upper() in ("", "Y", "YES", "1", "TRUE")
+        if active and uid not in submitted:
+            rows.append({
+                "DATE": diso, "USER ID": uid, "USER NAME": u.get("USER NAME", ""),
+                "DEPARTMENT": u.get("DEPARTMENT", ""),
+                "ISSUE": "මේ දිනයට TRANSACTION නෑ",
+            })
+    return pd.DataFrame(rows)

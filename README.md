@@ -16,13 +16,34 @@ GitHub එකට push කරලා **Streamlit Cloud** එකේ free deploy ක
 | ⏱️ **OT Approval** | OT request / approval tracking |
 | 📋 **Complaint** | Customer complaint log |
 | ✅ **KPI Update** | On-time KPI update tracking |
-| 💰 **Incentive** | User එක එකකට incentive එකතුව ගණනය + INSENTIVE sheet save |
+| 💰 **Incentive** | User එක එකකට incentive එකතුව + complaint penalty + INSENTIVE sheet save |
+| 🔍 **Audit** | Rule violations 5ක් highlight කරලා පෙන්නනවා (පහත බලන්න) |
+| 🛡️ **Admin** | Attendance approvals + නිවාඩු දවස් (HOLIDAY-M) setup *(PIN protected)* |
 | 👥 **Masters** | USER-M, TCODE-M, SITE-M ... live edit |
 | 🏠 **Dashboard** | Revenue / incentive charts |
 
 > මුල් Excel එකේ data ඔක්කොම (336 T-codes, 110 users, 128 customers, sites,
 > locations, times) seed data විදිහට මේකට දාලා තියෙනවා — Setup එක run කළාම
 > Google Sheet එක ම පිරිලා එනවා.
+
+---
+
+## 🔍 Audit Rules (system එකෙන්ම audit වෙනවා)
+
+| # | Rule | වැඩේ |
+|---|------|------|
+| 1 | **20hr cap** | `# OF WORKING HRS` පැය 20+ → **Admin approval** ඕනේ. Approve වෙනකම් PENDING. |
+| 2 | **නිවාඩු/ඉරිදා** | ඉරිදා හෝ admin නිවාඩු දවසකට attendance → **Admin approval** ඕනේ. |
+| 3 | **OT ↔ Transaction** | Scheduled time එකට වඩා වැඩ කළොත් ඒ දවසට TRANSACTION එකේ **OT-N/OT-D** තියෙන්න ඕනේ. නැත්නම් flag. |
+| 4 | **Complaint penalty** | CUSTOMMER COMPLAINT එකක් user ට add වුණොත් incentive එකෙන් අඩු වෙනවා (default 1000/complaint). |
+| 5 | **සතියට OT 15+** | සතියකට `# OF OT HRS` 15 ඉක්මෙව්වොත් highlight. |
+| 6 | **Missing Txn** | දවසකට TRANSACTION දාලා නැති active users highlight. |
+
+**වැඩ පැය schedule** (`schema.py` → `WORKDAY_HOURS`):
+සතියේ දවස් **08:00–17:00 = 8h** · සෙනසුරාදා **08:00–13:00 = 5h** · ඉරිදා **නිවාඩු**.
+
+**Admin login:** secrets එකේ `[app] admin_pin` දාලා, sidebar එකේ 🔑 Admin login එකෙන්
+PIN දාන්න. එතකොට Approvals + Holiday setup unlock වෙනවා.
 
 ---
 

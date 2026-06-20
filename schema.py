@@ -71,6 +71,13 @@ SHEETS = {
         "headers": ["SUPPLIER NAME", "ADDRESS", "MOBILE #", "WATS APP",
                     "MOBILE ALLOUNCE", "E-MAIL"],
     },
+    "HOLIDAY-M": {
+        "title": "HOLIDAY-M",
+        "kind": "master",
+        "seed": None,
+        # Admin මෙතනට නිවාඩු දවස් දානවා. TYPE = Public / Special / Mercantile…
+        "headers": ["DATE", "DESCRIPTION", "TYPE"],
+    },
 
     # ===================== TRANSACTIONAL (daily entry) ==================
     "TRANSACTION": {
@@ -93,7 +100,8 @@ SHEETS = {
             "UNIC CODE", "DATE", "USER ID", "USER NAME", "DEPARTMENT",
             "SUB DEPARTMENT", "IN TIME", "OUT TIME", "LUNCH & TEA",
             "WORK LOCATION", "IDLE TIME", "# OF WORKING HRS", "# OF OT HRS",
-            "UTILIZED HOURS", "UTILIZATION", "DAY", "REMARK",
+            "SCHEDULED HRS", "UTILIZED HOURS", "UTILIZATION", "DAY", "REMARK",
+            "APPROVAL STATUS", "APPROVAL NOTE",
         ],
     },
     "OT APPROVAL": {
@@ -133,9 +141,9 @@ SHEETS = {
         "seed": None,
         "headers": [
             "PERIOD", "USER ID", "USER NAME", "TXN INCENTIVE",
-            "# OF COMPLAINTS", "ZERO-COMPLAINT BONUS", "ON-TIME KPI BONUS",
-            "OT RECOVERY %", "100% OT RECOVERY BONUS", "TOTAL INSENTIVE",
-            "TARGET", "BALANCE", "REMARKS",
+            "# OF COMPLAINTS", "COMPLAINT PENALTY", "ZERO-COMPLAINT BONUS",
+            "ON-TIME KPI BONUS", "OT RECOVERY %", "100% OT RECOVERY BONUS",
+            "TOTAL INSENTIVE", "TARGET", "BALANCE", "REMARKS",
         ],
     },
 }
@@ -146,6 +154,23 @@ ONTIME_KPI_BONUS = 4000          # KPI on-time update bonus
 FULL_OT_RECOVERY_BONUS = 3000    # 100% OT recovery bonus
 TXN_INCENTIVE_DIVISOR = 10       # Transaction incentive = revenue / 10
 DEFAULT_TARGET = 20000           # Sheet2 එකේ Target = 20000
+COMPLAINT_PENALTY = 1000         # complaint එකකට incentive එකෙන් අඩු කරන මුදල
+
+# ───────────────── AUDIT / SCHEDULE rules ─────────────────
+WORKING_HRS_CAP = 20             # දවසකට පැය 20 ට වඩා -> Admin approval ඕනේ
+WEEKLY_OT_CAP = 15               # සතියකට OT පැය 15 ට වඩා -> highlight
+
+# සතියේ දවස් අනුව scheduled working hours (Python weekday(): 0=Mon … 6=Sun)
+#   සතියේ දවස් : 08:00–17:00, lunch 1h  -> 8h
+#   සෙනසුරාදා  : 08:00–13:00            -> 5h
+#   ඉරිදා      : නිවාඩු                 -> 0h
+WORKDAY_HOURS = {0: 8, 1: 8, 2: 8, 3: 8, 4: 8, 5: 5, 6: 0}
+
+# Approval status tokens (ATTANDANCE.APPROVAL STATUS)
+APPR_OK = "OK"               # rule violation එකක් නෑ
+APPR_PENDING = "PENDING"     # admin approval බලාගෙන
+APPR_APPROVED = "APPROVED"
+APPR_REJECTED = "REJECTED"
 
 MASTER_SHEETS = [k for k, v in SHEETS.items() if v["kind"] == "master"]
 TXN_SHEETS = [k for k, v in SHEETS.items() if v["kind"] == "txn"]

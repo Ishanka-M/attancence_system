@@ -40,6 +40,21 @@ def _tcodes():
     return gsheets.get_df("TCODE-M")
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _holidays_set():
+    try:
+        return calc.holiday_set(gsheets.get_df("HOLIDAY-M"))
+    except Exception:
+        return set()
+
+
+def style_flag(df: pd.DataFrame, color="#ffd6d6"):
+    """Audit dataframe එකක් මුළුමනින්ම highlight (warning) කරනවා."""
+    if df is None or df.empty:
+        return df
+    return df.style.apply(lambda _: [f"background-color:{color}"] * len(df.columns), axis=1)
+
+
 def user_picker(label="USER", key=None):
     df = _users()
     if df.empty:
@@ -62,9 +77,33 @@ st.sidebar.caption("CSS • Streamlit + Google Sheets")
 PAGES = [
     "🏠 Dashboard", "⚙️ Setup", "📝 Transaction", "🕐 Attendance",
     "⏱️ OT Approval", "📋 Complaint", "✅ KPI Update", "💰 Incentive",
-    "👥 Masters",
+    "🔍 Audit", "🛡️ Admin", "👥 Masters",
 ]
 page = st.sidebar.radio("Menu", PAGES, label_visibility="collapsed")
+
+# ── Admin gate (PIN) ──────────────────────────────────────
+st.sidebar.divider()
+_admin_pin = str(st.secrets.get("app", {}).get("admin_pin", "")).strip()
+if "is_admin" not in st.session_state:
+    st.session_state.is_admin = False
+with st.sidebar.expander("🔑 Admin login", expanded=False):
+    if st.session_state.is_admin:
+        st.success("Admin mode ON")
+        if st.button("Logout"):
+            st.session_state.is_admin = False
+            st.rerun()
+    else:
+        pin = st.text_input("Admin PIN", type="password", key="pin_in")
+        if st.button("Login"):
+            if _admin_pin and pin == _admin_pin:
+                st.session_state.is_admin = True
+                st.rerun()
+            elif not _admin_pin:
+                st.warning("secrets.toml එකේ [app] admin_pin එකක් දාන්න.")
+            else:
+                st.error("PIN වැරදියි.")
+
+IS_ADMIN = st.session_state.is_admin
 
 # connection check
 try:
@@ -194,6 +233,7 @@ elif page == "🕐 Attendance":
     st.header("🕐 Attendance Entry")
     locs = gsheets.get_df("LOCATION-M")
     loc_opts = locs["LOCATION"].tolist() if "LOCATION" in locs else ["EGF"]
+    holidays = _holidays_set()
 
     with st.form("att"):
         c1, c2, c3 = st.columns(3)
@@ -213,6 +253,18 @@ elif page == "🕐 Attendance":
         util_hrs = c6.number_input("UTILIZED HOURS", 0.0, step=0.5,
                                    help="TRANSACTION වලින් එන utilize hours")
         remark = st.text_input("REMARK", "")
+
+        # ── live schedule / rule info ──
+        sched = calc.scheduled_hours(date_v, holidays)
+        needs_appr, reason = calc.attendance_needs_approval(wh, date_v, holidays)
+        i1, i2, i3 = st.columns(3)
+        i1.metric("Scheduled HRS", f"{sched:.0f}")
+        i2.metric("Day", date_v.strftime("%a"))
+        i3.metric("Cap", f"{schema.WORKING_HRS_CAP}")
+        if needs_appr:
+            st.warning(f"⚠️ Approval ඕනේ: {reason}. "
+                       + ("Admin නිසා approve කරලා save කරයි." if IS_ADMIN
+                          else "PENDING විදිහට save වෙයි — admin approve කරන්න ඕනේ."))
         submitted = st.form_submit_button("➕ Add Attendance", type="primary")
 
     if submitted and uid:
@@ -221,13 +273,24 @@ elif page == "🕐 Attendance":
         urow = udf[udf["USER ID"] == uid]
         dept = urow["DEPARTMENT"].iloc[0] if not urow.empty else ""
         subdept = urow["SUB DEPARTMENT"].iloc[0] if not urow.empty and "SUB DEPARTMENT" in urow else ""
+        needs_appr, reason = calc.attendance_needs_approval(wh, date_v, holidays)
+        if not needs_appr:
+            status, note = schema.APPR_OK, ""
+        elif IS_ADMIN:
+            status, note = schema.APPR_APPROVED, f"Admin approved: {reason}"
+        else:
+            status, note = schema.APPR_PENDING, reason
         row = [
             unic(date_v, uid), date_v.isoformat(), uid, uname, dept, subdept,
             in_t.strftime("%H:%M"), out_t.strftime("%H:%M"), lunch, loc, "",
-            wh, ot, util_hrs, util, date_v.strftime("%a").upper(), remark,
+            wh, ot, sched, util_hrs, util, date_v.strftime("%a").upper(), remark,
+            status, note,
         ]
         gsheets.append_rows("ATTANDANCE", [row])
-        st.success(f"Added ✅  Utilization {util:.1%}")
+        if status == schema.APPR_PENDING:
+            st.warning(f"PENDING විදිහට save කළා ⏳ — Admin approve කරන තුරු valid නෑ. ({reason})")
+        else:
+            st.success(f"Added ✅  Utilization {util:.1%}  ·  Status: {status}")
         st.cache_data.clear()
 
     st.divider()
@@ -343,13 +406,146 @@ elif page == "💰 Incentive":
     if "inc_df" in st.session_state:
         inc = st.session_state["inc_df"]
         st.dataframe(inc, use_container_width=True, hide_index=True)
-        c1, c2 = st.columns(2)
+        c1, c2, c3 = st.columns(3)
         c1.metric("Total Incentive Payout", f'{inc["TOTAL INSENTIVE"].apply(calc._f).sum():,.0f}')
-        c2.metric("Employees", len(inc))
+        c2.metric("Total Complaint Penalty", f'{inc["COMPLAINT PENALTY"].apply(calc._f).sum():,.0f}')
+        c3.metric("Employees", len(inc))
         if st.button("💾 INSENTIVE sheet එකට save කරන්න"):
             gsheets.overwrite("INSENTIVE", inc)
             st.success("INSENTIVE sheet update කළා ✅")
             st.cache_data.clear()
+
+
+# ═══════════════════════════ AUDIT ═══════════════════════════
+elif page == "🔍 Audit":
+    st.header("🔍 Audit — Rule Violations")
+    try:
+        att = gsheets.get_df("ATTANDANCE")
+        txn = gsheets.get_df("TRANSACTION")
+        users = _users()
+    except Exception:
+        st.info("මුලින් Setup එකෙන් sheets create කරන්න.")
+        st.stop()
+    holidays = _holidays_set()
+
+    tabs = st.tabs([
+        "🚫 20hr+ Cap", "📅 Holiday/Sunday", "⏱️ OT w/o Txn",
+        "📈 Weekly OT 15+", "❓ Missing Txn",
+    ])
+
+    # 1) Working hours > 20 without approval
+    with tabs[0]:
+        st.caption(f"# OF WORKING HRS > {schema.WORKING_HRS_CAP}, approve කරලා නැති rows.")
+        d1 = calc.audit_working_hours_cap(att)
+        if d1.empty:
+            st.success("✅ Violations නෑ.")
+        else:
+            st.error(f"⚠️ {len(d1)} rows — admin approval ඕනේ.")
+            st.dataframe(style_flag(d1), use_container_width=True, hide_index=True)
+
+    # 2) Holiday / Sunday attendance
+    with tabs[1]:
+        st.caption("ඉරිදා / admin නිවාඩු දවස් වලට attendance (approve කරලා නැති).")
+        d2 = calc.audit_holiday_attendance(att, holidays)
+        if d2.empty:
+            st.success("✅ Violations නෑ.")
+        else:
+            st.error(f"⚠️ {len(d2)} rows.")
+            st.dataframe(style_flag(d2, "#ffe9c7"), use_container_width=True, hide_index=True)
+
+    # 3) OT worked but no OT transaction
+    with tabs[2]:
+        st.caption("Scheduled time එකට වඩා වැඩ කරලා, ඒ දවසට OT-N/OT-D transaction නැති.")
+        d3 = calc.audit_ot_without_transaction(att, txn, holidays)
+        if d3.empty:
+            st.success("✅ හැම OT එකකටම transaction තියෙනවා.")
+        else:
+            st.error(f"⚠️ {len(d3)} rows — OT transaction missing.")
+            cols = [c for c in ["DATE", "USER ID", "USER NAME", "# OF WORKING HRS",
+                                "SCHEDULED HRS", "# OF OT HRS", "EXTRA HRS", "ISSUE"]
+                    if c in d3.columns]
+            st.dataframe(style_flag(d3[cols]), use_container_width=True, hide_index=True)
+
+    # 4) Weekly OT > 15
+    with tabs[3]:
+        st.caption(f"සතියකට # OF OT HRS > {schema.WEEKLY_OT_CAP}.")
+        d4 = calc.audit_weekly_ot(att)
+        if d4.empty:
+            st.success("✅ සතියේ OT cap එක ඉක්මවලා නෑ.")
+        else:
+            st.error(f"⚠️ {len(d4)} user-weeks.")
+            st.dataframe(style_flag(d4, "#ffd6d6"), use_container_width=True, hide_index=True)
+
+    # 5) Missing transactions for a date
+    with tabs[4]:
+        adate = st.date_input("දිනය", dt.date.today(), key="audit_missing_date")
+        d5 = calc.audit_missing_transactions(users, txn, adate)
+        if d5.empty:
+            st.success("✅ හැම active user කෙනෙක්ම transaction දාලා.")
+        else:
+            st.error(f"⚠️ {len(d5)} users — {adate.isoformat()} දිනට transaction නෑ.")
+            st.dataframe(style_flag(d5, "#e0e0ff"), use_container_width=True, hide_index=True)
+
+
+# ═══════════════════════════ ADMIN ═══════════════════════════
+elif page == "🛡️ Admin":
+    st.header("🛡️ Admin")
+    if not IS_ADMIN:
+        st.warning("මේ page එක admin ලට පමණයි. Sidebar එකේ 🔑 Admin login එකෙන් PIN දාන්න.")
+        st.stop()
+
+    a1, a2 = st.tabs(["✅ Attendance Approvals", "📅 Holiday Setup"])
+
+    # ── Pending attendance approvals ──
+    with a1:
+        st.subheader("PENDING attendance approvals")
+        att = gsheets.get_df("ATTANDANCE")
+        if "APPROVAL STATUS" not in att or att.empty:
+            st.info("Attendance data නෑ.")
+        else:
+            pend = att[att["APPROVAL STATUS"].astype(str).str.upper() == schema.APPR_PENDING]
+            if pend.empty:
+                st.success("✅ Pending approvals නෑ.")
+            else:
+                st.error(f"{len(pend)} pending.")
+                show_cols = [c for c in ["UNIC CODE", "DATE", "USER ID", "USER NAME",
+                                         "# OF WORKING HRS", "APPROVAL NOTE"] if c in pend.columns]
+                st.dataframe(pend[show_cols], use_container_width=True, hide_index=True)
+
+                pick = st.selectbox("UNIC CODE තෝරන්න", pend["UNIC CODE"].tolist())
+                c1, c2 = st.columns(2)
+                if c1.button("✅ Approve", type="primary"):
+                    att.loc[att["UNIC CODE"] == pick, "APPROVAL STATUS"] = schema.APPR_APPROVED
+                    gsheets.overwrite("ATTANDANCE", att)
+                    st.success(f"{pick} approved ✅")
+                    st.cache_data.clear()
+                    st.rerun()
+                if c2.button("❌ Reject"):
+                    att.loc[att["UNIC CODE"] == pick, "APPROVAL STATUS"] = schema.APPR_REJECTED
+                    gsheets.overwrite("ATTANDANCE", att)
+                    st.warning(f"{pick} rejected")
+                    st.cache_data.clear()
+                    st.rerun()
+
+    # ── Holiday setup ──
+    with a2:
+        st.subheader("නිවාඩු දවස් setup")
+        st.caption("මෙතන දාන දවස් වලට scheduled hours = 0. ඒ දවස් වලට attendance "
+                   "දාන්න admin approval ඕනේ වෙයි.")
+        hdf = gsheets.get_df("HOLIDAY-M")
+        edited = st.data_editor(hdf, num_rows="dynamic", use_container_width=True,
+                                hide_index=True, key="hol_ed",
+                                column_config={"DATE": st.column_config.TextColumn(
+                                    "DATE (YYYY-MM-DD)")})
+        if st.button("💾 Holidays save", type="primary"):
+            gsheets.overwrite("HOLIDAY-M", edited)
+            st.success("HOLIDAY-M update කළා ✅")
+            st.cache_data.clear()
+
+        st.divider()
+        st.caption(f"⚙️ Rules: දවසකට cap {schema.WORKING_HRS_CAP}h · සතියට OT cap "
+                   f"{schema.WEEKLY_OT_CAP}h · complaint penalty {schema.COMPLAINT_PENALTY} · "
+                   f"schedule (Mon–Fri 8h, Sat 5h, Sun 0h). මේවා schema.py එකේ වෙනස් කරන්න.")
 
 
 # ═══════════════════════════ MASTERS ═══════════════════════════
