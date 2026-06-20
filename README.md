@@ -8,6 +8,31 @@ GitHub එකට push කරලා **Streamlit Cloud** එකේ free deploy ක
 
 ## ✨ විශේෂාංග
 
+### 🔐 Login & Roles
+- **👤 User login** — USER ID එකෙන් log වෙනවා. තමන්ගේ USER ID එකට අදාළ
+  data විතරක් (Dashboard, Transaction, Attendance, Incentive) පේනවා.
+  Admin password set කරලා නැත්නම් password හිස්ව log වෙන්න පුළුවන්.
+- **🛡️ Admin login** — `admin_pin` එකෙන්. **සම්පූර්ණ data + reports + audit +
+  uploads + master CRUD** ඔක්කොම පේනවා.
+
+| Page | User | Admin |
+|------|:----:|:-----:|
+| 🏠 Dashboard (monthly OT/Revenue/Cost/Incentive) | තමන්ගේ | සියල්ල |
+| 📝 Transaction · 🕐 Attendance | තමන්ට lock | සියල්ල |
+| 💰 Incentive | තමන්ගේ row | recalc + save |
+| ⚙️ Setup · ⏱️ OT · 📋 Complaint · ✅ KPI · 🔍 Audit | — | ✅ |
+| 📥 Export · 📤 Upload · 🛡️ Admin · 🗂️ Data Manager | — | ✅ |
+
+### 📤 Bulk Upload (admin)
+ATTANDANCE / TRANSACTION — Excel (.xlsx) හෝ CSV එකකින් data එකපාර add කරන්න.
+Template එකක් download කරගන්න පුළුවන්. TRANSACTION upload කරද්දී
+**calculated fields (SMV/UTILIZE/REVANUE/In) auto-recompute** වෙනවා (checkbox).
+
+### 🗂️ Data Manager (admin) — Add / Update / Delete
+`USER-M`, `CUSTOMMER-M`, `TCODE-M` (= Master sheet - Finalized),
+`CUSTOMMER COMPLAINT` ඇතුළු ඕනෑම sheet එකක records **add / update / delete**
+කරන්න පුළුවන් (table එකේ edit කරලා Save).
+
 | Page | වැඩේ |
 |------|------|
 | ⚙️ **Setup** | Google Sheet එකේ **හැම tab එකක්ම auto-create** + masters seed |

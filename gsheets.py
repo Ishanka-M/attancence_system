@@ -57,7 +57,7 @@ def _seed_rows(sheet_key: str) -> list[list]:
         return [[
             d.get("USER_ID", ""), d.get("COMPANY", ""), d.get("DEPARTMENT", ""),
             d.get("SUB_DEPARTMENT", ""), d.get("USER_NAME", ""),
-            d.get("SUPERVISOR_ID", ""), d.get("SUPERVISOR", ""), "Y",
+            d.get("SUPERVISOR_ID", ""), d.get("SUPERVISOR", ""), "Y", "",
         ] for d in data]
 
     if seed_key == "TCODE":
@@ -94,9 +94,25 @@ def get_spreadsheet():
     cfg = st.secrets.get("app", {})
     sid = cfg.get("spreadsheet_id", "").strip()
     name = cfg.get("spreadsheet_name", "EFL KPI System").strip()
+    sa_email = dict(st.secrets["gcp_service_account"]).get("client_email", "?")
+
+    # URL එකක් අතුළත් කරලා නම් ID එක extract කරනවා
+    if "docs.google.com" in sid and "/d/" in sid:
+        sid = sid.split("/d/")[1].split("/")[0]
 
     if sid:
-        return client.open_by_key(sid)
+        try:
+            return client.open_by_key(sid)
+        except gspread.exceptions.APIError as e:
+            raise RuntimeError(
+                f"Sheet එක open කරන්න බෑ (id='{sid}').\n\n"
+                f"1) spreadsheet_id එක හරිද බලන්න — URL එකේ /d/ සහ /edit අතර කොටස විතරයි.\n"
+                f"2) Sheet එක මේ service account එකට share කරන්න ඕනේ (Editor):\n"
+                f"   👉 {sa_email}\n"
+                f"   (Google Sheet → Share → මේ email එක දාලා Editor → Send)\n\n"
+                f"නැත්නම් spreadsheet_id හිස් තියලා app එකට අලුත් එකක් හදන්න දෙන්න."
+            ) from e
+
     try:
         return client.open(name)
     except gspread.SpreadsheetNotFound:

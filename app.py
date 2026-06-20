@@ -56,6 +56,10 @@ def style_flag(df: pd.DataFrame, color="#ffd6d6"):
 
 
 def user_picker(label="USER", key=None):
+    # User role නම් තමන්ටම lock — admin නම් විතරක් තෝරන්න පුළුවන්
+    if not IS_ADMIN and CURRENT_UID:
+        st.caption(f"👤 {CURRENT_UID} — {CURRENT_UNAME}")
+        return CURRENT_UID, CURRENT_UNAME
     df = _users()
     if df.empty:
         st.warning("USER-M හිස්. මුලින් Setup එකෙන් sheets create කරන්න.")
@@ -66,52 +70,98 @@ def user_picker(label="USER", key=None):
     return opts[sel]
 
 
-def df_show(df: pd.DataFrame, n=200):
+def scope_df(df: pd.DataFrame) -> pd.DataFrame:
+    """User role නම් තමන්ගේ USER ID data විතරක්. Admin නම් සම්පූර්ණ data."""
+    if IS_ADMIN or df is None or df.empty or "USER ID" not in df:
+        return df
+    return df[df["USER ID"].astype(str).str.strip() == CURRENT_UID]
+
+
+def df_show(df: pd.DataFrame, n=200, scope=True):
+    if scope:
+        df = scope_df(df)
     st.dataframe(df.tail(n), use_container_width=True, hide_index=True)
 
 
-# ───────────────────────── sidebar ─────────────────────────
+# ───────────────────────── connect ─────────────────────────
 st.sidebar.title("📊 EFL KPI System")
 st.sidebar.caption("CSS • Streamlit + Google Sheets")
 
-PAGES = [
-    "🏠 Dashboard", "⚙️ Setup", "📝 Transaction", "🕐 Attendance",
-    "⏱️ OT Approval", "📋 Complaint", "✅ KPI Update", "💰 Incentive",
-    "🔍 Audit", "📥 Export", "🛡️ Admin", "👥 Masters",
-]
-page = st.sidebar.radio("Menu", PAGES, label_visibility="collapsed")
+try:
+    gsheets.get_spreadsheet()
+except Exception as e:
+    st.error("Google Sheet සම්බන්ධ වෙන්නෑ — secrets.toml බලන්න.")
+    st.exception(e)
+    st.stop()
 
-# ── Admin gate (PIN) ──────────────────────────────────────
-st.sidebar.divider()
+# ───────────────────────── LOGIN ─────────────────────────
+ss = st.session_state
+ss.setdefault("role", None)      # None | "user" | "admin"
+ss.setdefault("uid", "")
+ss.setdefault("uname", "")
 _admin_pin = str(st.secrets.get("app", {}).get("admin_pin", "")).strip()
-if "is_admin" not in st.session_state:
-    st.session_state.is_admin = False
-with st.sidebar.expander("🔑 Admin login", expanded=False):
-    if st.session_state.is_admin:
-        st.success("Admin mode ON")
-        if st.button("Logout"):
-            st.session_state.is_admin = False
-            st.rerun()
-    else:
-        pin = st.text_input("Admin PIN", type="password", key="pin_in")
-        if st.button("Login"):
+
+
+def _login_screen():
+    st.header("🔐 Login")
+    tab_u, tab_a = st.tabs(["👤 User", "🛡️ Admin"])
+
+    with tab_u:
+        udf = _users()
+        if udf.empty:
+            st.warning("USER-M හිස්. Admin login වෙලා Setup → Auto-Create කරන්න.")
+        else:
+            opts = {f'{r["USER ID"]} — {r["USER NAME"]}': (str(r["USER ID"]).strip(),
+                    r.get("USER NAME", ""), str(r.get("PASSWORD", "")).strip())
+                    for _, r in udf.iterrows() if str(r.get("USER ID", "")).strip()}
+            sel = st.selectbox("USER ID", list(opts.keys()), key="login_uid")
+            uid, uname, pw = opts[sel]
+            entered = st.text_input("Password", type="password", key="login_upw",
+                                    help="Admin password set කරලා නැත්නම් හිස්ව තියලා Login කරන්න.")
+            if st.button("Login", type="primary", key="login_ubtn"):
+                if pw and entered != pw:
+                    st.error("Password වැරදියි.")
+                else:
+                    ss.role, ss.uid, ss.uname = "user", uid, uname
+                    st.rerun()
+
+    with tab_a:
+        pin = st.text_input("Admin PIN", type="password", key="login_pin")
+        if st.button("Admin Login", type="primary", key="login_abtn"):
             if _admin_pin and pin == _admin_pin:
-                st.session_state.is_admin = True
+                ss.role, ss.uid, ss.uname = "admin", "ADMIN", "Administrator"
                 st.rerun()
             elif not _admin_pin:
                 st.warning("secrets.toml එකේ [app] admin_pin එකක් දාන්න.")
             else:
                 st.error("PIN වැරදියි.")
 
-IS_ADMIN = st.session_state.is_admin
 
-# connection check
-try:
-    gsheets.get_spreadsheet()
-    st.sidebar.success("Google Sheet සම්බන්ධයි ✅")
-except Exception as e:
-    st.sidebar.error("Sheet සම්බන්ධ වෙන්නෑ. secrets.toml බලන්න.")
-    st.sidebar.exception(e)
+if ss.role is None:
+    _login_screen()
+    st.stop()
+
+IS_ADMIN = ss.role == "admin"
+CURRENT_UID = ss.uid
+CURRENT_UNAME = ss.uname
+
+# ── sidebar: who + logout ──
+st.sidebar.success(("🛡️ Admin" if IS_ADMIN else f"👤 {CURRENT_UID}") + " logged in")
+if st.sidebar.button("Logout"):
+    ss.role, ss.uid, ss.uname = None, "", ""
+    st.rerun()
+
+# ── role අනුව pages ──
+if IS_ADMIN:
+    PAGES = [
+        "🏠 Dashboard", "⚙️ Setup", "📝 Transaction", "🕐 Attendance",
+        "⏱️ OT Approval", "📋 Complaint", "✅ KPI Update", "💰 Incentive",
+        "🔍 Audit", "📥 Export", "📤 Upload", "🛡️ Admin", "🗂️ Data Manager",
+    ]
+else:
+    PAGES = ["🏠 Dashboard", "📝 Transaction", "🕐 Attendance", "💰 Incentive"]
+
+page = st.sidebar.radio("Menu", PAGES, label_visibility="collapsed")
 
 
 # ═══════════════════════════ SETUP ═══════════════════════════
@@ -146,10 +196,10 @@ if page == "⚙️ Setup":
 
 # ═══════════════════════════ DASHBOARD ═══════════════════════════
 elif page == "🏠 Dashboard":
-    st.header("🏠 Dashboard")
+    st.header("🏠 Dashboard" + ("" if IS_ADMIN else f" — {CURRENT_UNAME}"))
     try:
-        txn = gsheets.get_df("TRANSACTION")
-        att = gsheets.get_df("ATTANDANCE")
+        txn = scope_df(gsheets.get_df("TRANSACTION"))
+        att = scope_df(gsheets.get_df("ATTANDANCE"))
     except Exception:
         st.info("මුලින් Setup එකෙන් sheets create කරන්න.")
         st.stop()
@@ -416,38 +466,56 @@ elif page == "✅ KPI Update":
 
 # ═══════════════════════════ INCENTIVE ═══════════════════════════
 elif page == "💰 Incentive":
-    st.header("💰 Incentive Calculation")
+    st.header("💰 Incentive")
     st.caption(
         f"TXN Incentive = Revenue ÷ {schema.TXN_INCENTIVE_DIVISOR} • "
         f"0-Complaint bonus = {schema.ZERO_COMPLAINT_BONUS} • "
-        f"On-time KPI = {schema.ONTIME_KPI_BONUS} • "
-        f"100% OT recovery = {schema.FULL_OT_RECOVERY_BONUS} • "
-        f"Target = {schema.DEFAULT_TARGET}"
+        f"On-time KPI = {schema.ONTIME_KPI_BONUS} • Complaint penalty = "
+        f"{schema.COMPLAINT_PENALTY} • Target = {schema.DEFAULT_TARGET}"
     )
-    period = st.text_input("PERIOD label", dt.date.today().strftime("%Y-%m"))
 
-    if st.button("🧮 Calculate Incentive", type="primary"):
-        with st.spinner("ගණනය කරනවා…"):
-            inc = calc.compute_incentive(
-                gsheets.get_df("TRANSACTION"),
-                gsheets.get_df("CUSTOMMER COMPLAINT"),
-                gsheets.get_df("KPI UPDATE"),
-                gsheets.get_df("USER-M"),
-                period,
-            )
-        st.session_state["inc_df"] = inc
+    if not IS_ADMIN:
+        # User: තමන්ගේ incentive එක විතරක් (live ගණනය)
+        inc = calc.compute_incentive(
+            scope_df(gsheets.get_df("TRANSACTION")),
+            scope_df(gsheets.get_df("CUSTOMMER COMPLAINT")),
+            scope_df(gsheets.get_df("KPI UPDATE")),
+            _users()[_users()["USER ID"].astype(str).str.strip() == CURRENT_UID],
+            dt.date.today().strftime("%Y-%m"),
+        )
+        if inc.empty:
+            st.info("තවම incentive data නෑ.")
+        else:
+            row = inc.iloc[0]
+            c1, c2, c3 = st.columns(3)
+            c1.metric("TXN Incentive", f'{calc._f(row["TXN INCENTIVE"]):,.0f}')
+            c2.metric("Penalty", f'{calc._f(row["COMPLAINT PENALTY"]):,.0f}')
+            c3.metric("TOTAL", f'{calc._f(row["TOTAL INSENTIVE"]):,.0f}')
+            st.dataframe(inc, use_container_width=True, hide_index=True)
+    else:
+        period = st.text_input("PERIOD label", dt.date.today().strftime("%Y-%m"))
+        if st.button("🧮 Calculate Incentive", type="primary"):
+            with st.spinner("ගණනය කරනවා…"):
+                inc = calc.compute_incentive(
+                    gsheets.get_df("TRANSACTION"),
+                    gsheets.get_df("CUSTOMMER COMPLAINT"),
+                    gsheets.get_df("KPI UPDATE"),
+                    gsheets.get_df("USER-M"),
+                    period,
+                )
+            st.session_state["inc_df"] = inc
 
-    if "inc_df" in st.session_state:
-        inc = st.session_state["inc_df"]
-        st.dataframe(inc, use_container_width=True, hide_index=True)
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Total Incentive Payout", f'{inc["TOTAL INSENTIVE"].apply(calc._f).sum():,.0f}')
-        c2.metric("Total Complaint Penalty", f'{inc["COMPLAINT PENALTY"].apply(calc._f).sum():,.0f}')
-        c3.metric("Employees", len(inc))
-        if st.button("💾 INSENTIVE sheet එකට save කරන්න"):
-            gsheets.overwrite("INSENTIVE", inc)
-            st.success("INSENTIVE sheet update කළා ✅")
-            st.cache_data.clear()
+        if "inc_df" in st.session_state:
+            inc = st.session_state["inc_df"]
+            st.dataframe(inc, use_container_width=True, hide_index=True)
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total Incentive Payout", f'{inc["TOTAL INSENTIVE"].apply(calc._f).sum():,.0f}')
+            c2.metric("Total Complaint Penalty", f'{inc["COMPLAINT PENALTY"].apply(calc._f).sum():,.0f}')
+            c3.metric("Employees", len(inc))
+            if st.button("💾 INSENTIVE sheet එකට save කරන්න"):
+                gsheets.overwrite("INSENTIVE", inc)
+                st.success("INSENTIVE sheet update කළා ✅")
+                st.cache_data.clear()
 
 
 # ═══════════════════════════ AUDIT ═══════════════════════════
@@ -578,6 +646,73 @@ elif page == "📥 Export":
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
+# ═══════════════════════════ UPLOAD ═══════════════════════════
+elif page == "📤 Upload":
+    st.header("📤 Bulk Upload — ATTANDANCE / TRANSACTION")
+    st.caption("Excel (.xlsx) හෝ CSV එකකින් data එකපාර add කරන්න. Column නම් "
+               "sheet එකේ headers එක්ක match විය යුතුයි (template download කරගන්න).")
+
+    target = st.selectbox("Sheet", ["TRANSACTION", "ATTANDANCE"])
+    headers = schema.SHEETS[target]["headers"]
+
+    # template download (headers only)
+    tmpl = pd.DataFrame(columns=headers)
+    st.download_button("⬇️ Template (.csv) download",
+                       tmpl.to_csv(index=False).encode("utf-8-sig"),
+                       file_name=f"{target}_template.csv", mime="text/csv")
+
+    recompute = False
+    if target == "TRANSACTION":
+        recompute = st.checkbox(
+            "Calculated fields recompute කරන්න (SMV / UTILIZE HOURS / REVANUE / In)",
+            value=True,
+            help="T-CODE + TIME + # OF TRANSACTION එකෙන් නැවත ගණනය කරනවා.")
+
+    up = st.file_uploader("File එක", type=["xlsx", "xls", "csv"])
+    if up is not None:
+        try:
+            raw = pd.read_csv(up, dtype=str) if up.name.lower().endswith("csv") \
+                else pd.read_excel(up, dtype=str)
+        except Exception as e:
+            st.error(f"File කියවන්න බෑ: {e}")
+            st.stop()
+        raw = raw.fillna("")
+        st.write(f"කියෙව්වා: {len(raw)} rows, columns: {list(raw.columns)}")
+
+        # headers වලට align — නැති columns හිස්ව, extra columns drop
+        aligned = pd.DataFrame({h: raw[h] if h in raw.columns else "" for h in headers})
+
+        if target == "TRANSACTION" and recompute:
+            lut = calc.build_tcode_lookup(_tcodes())
+            rows = []
+            for _, r in aligned.iterrows():
+                code = str(r["T-CODE"]).strip()
+                info = lut.get(code, {})
+                res = calc.calc_transaction(info, r["TIME"], r["# OF TRANSACTION"])
+                r["CSSTR00"] = r["CSSTR00"] or info.get("desc", "")
+                r["UOM"] = r["UOM"] or info.get("uom", "")
+                r["SMV"] = res["smv"]
+                r["UTILIZE HOURS"] = res["utilize_hours"]
+                r["REVANUE-NORMAL"] = res["rev_normal"]
+                r["REVANUE-OT -N"] = res["rev_otn"]
+                r["REVANUE-OT -D"] = res["rev_otd"]
+                r["In"] = res["txn_incentive"]
+                # UNIC CODE නැත්නම් හදනවා
+                if not str(r["UNIC CODE"]).strip() and str(r["Date"]).strip() and str(r["USER ID"]).strip():
+                    r["UNIC CODE"] = unic(calc._to_date(r["Date"]) or r["Date"], str(r["USER ID"]).strip())
+                rows.append(r)
+            aligned = pd.DataFrame(rows, columns=headers)
+
+        st.subheader("Preview")
+        st.dataframe(aligned.head(50), use_container_width=True, hide_index=True)
+
+        if st.button(f"⬆️ {target} එකට {len(aligned)} rows append කරන්න", type="primary"):
+            body = aligned.fillna("").astype(str).values.tolist()
+            gsheets.append_rows(target, body)
+            st.success(f"{len(body)} rows {target} එකට add කළා ✅")
+            st.cache_data.clear()
+
+
 # ═══════════════════════════ ADMIN ═══════════════════════════
 elif page == "🛡️ Admin":
     st.header("🛡️ Admin")
@@ -639,16 +774,34 @@ elif page == "🛡️ Admin":
                    f"schedule (Mon–Fri 8h, Sat 5h, Sun 0h). මේවා schema.py එකේ වෙනස් කරන්න.")
 
 
-# ═══════════════════════════ MASTERS ═══════════════════════════
-elif page == "👥 Masters":
-    st.header("👥 Master Data")
-    mkey = st.selectbox("Master sheet", schema.MASTER_SHEETS)
+# ═══════════════════════════ DATA MANAGER ═══════════════════════════
+elif page == "🗂️ Data Manager":
+    st.header("🗂️ Data Manager — Add / Update / Delete")
+    if not IS_ADMIN:
+        st.warning("Admin ලට පමණයි.")
+        st.stop()
+
+    # Admin CRUD කරන්න පුළුවන් sheets — user ඉල්ලපු ඒවා මුලින්
+    editable = ["USER-M", "CUSTOMMER-M", "TCODE-M", "CUSTOMMER COMPLAINT"]
+    editable += [s for s in (schema.MASTER_SHEETS + schema.TXN_SHEETS)
+                 if s not in editable and s != "INSENTIVE"]
+
+    mkey = st.selectbox("Sheet", editable)
     df = gsheets.get_df(mkey)
-    st.caption(f"{len(df)} records • cell එකක් double-click කරලා edit කරන්න, "
-               "පහල row එකකින් අලුත් record එකක් දාන්න.")
+    st.caption(f"{len(df)} records • cell double-click → **update** · "
+               "පහළ හිස් row එකෙන් → **add** · row එක select කරලා delete key → **delete** · "
+               "අන්තිමට Save click කරන්න.")
     edited = st.data_editor(df, use_container_width=True, num_rows="dynamic",
                             hide_index=True, key=f"ed_{mkey}")
-    if st.button("💾 Save changes", type="primary"):
+
+    c1, c2 = st.columns([1, 4])
+    if c1.button("💾 Save", type="primary"):
         gsheets.overwrite(mkey, edited)
-        st.success(f"{mkey} update කළා ✅")
+        st.success(f"{mkey} update කළා ✅ ({len(edited)} rows)")
         st.cache_data.clear()
+    c2.caption("⚠️ Save කළාම මුළු sheet එකම මේ table එකෙන් replace වෙනවා "
+               "(add + update + delete එකවර apply වෙනවා).")
+
+    if mkey == "TCODE-M":
+        st.info("ℹ️ TCODE-M = මුල් Excel එකේ *Master sheet - Finalized* (SMV/rate engine). "
+                "rate column වෙනස් කළාම ඊට පස්සේ එන transactions වලට ඒ අගයම apply වෙනවා.")

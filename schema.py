@@ -24,7 +24,7 @@ SHEETS = {
         "seed": "USER",
         "headers": [
             "USER ID", "COMPANY", "DEPARTMENT", "SUB DEPARTMENT",
-            "USER NAME", "SUPERVISOR ID", "SUPERVISOR", "ACTIVE",
+            "USER NAME", "SUPERVISOR ID", "SUPERVISOR", "ACTIVE", "PASSWORD",
         ],
     },
     "TCODE-M": {
