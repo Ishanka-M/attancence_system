@@ -181,6 +181,7 @@ LUNCH_TEA_HOURS = 1.0            # # OF WORKING HRS වලින් අඩු �
 # ───────────────── AUDIT / SCHEDULE rules ─────────────────
 WORKING_HRS_CAP = 20             # දවසකට පැය 20 ට වඩා -> Admin approval ඕනේ
 WEEKLY_OT_CAP = 15               # සතියකට OT පැය 15 ට වඩා -> highlight
+MONTHLY_OT_CAP = 60              # මාසෙකට OT පැය 60 ට වඩා -> Audit violation
 
 # ── Payroll / Cost-to-Company constants (Book1 format එකෙන්) ──
 OT_HOURLY_DIVISOR = 240          # OT hourly = Basic ÷ 240 (30 days × 8h)

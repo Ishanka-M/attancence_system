@@ -12,13 +12,14 @@ from __future__ import annotations
 import datetime as dt
 
 import pandas as pd
+import plotly.graph_objects as go
 import streamlit as st
 
 import calc
 import gsheets
 import schema
 
-st.set_page_config(page_title="EFL KPI System", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Central System Support Team KPI System", page_icon="📊", layout="wide")
 
 # ───────────────────────── UI polish (dark theme) ─────────────────────────
 st.markdown("""
@@ -101,6 +102,34 @@ def style_flag(df: pd.DataFrame, color="#ffd6d6"):
     return df.style.apply(lambda _: [css] * len(df.columns), axis=1)
 
 
+def gauge(value, max_value, title, color="#4da3ff", suffix=""):
+    """Analog meter (gauge) — dark theme. st.plotly_chart වලින් render කරන්න."""
+    mx = max_value if max_value and max_value > 0 else 1
+    fig = go.Figure(go.Indicator(
+        mode="gauge+number",
+        value=float(value or 0),
+        number={"suffix": suffix, "font": {"color": "#e8eaed", "size": 28}},
+        title={"text": title, "font": {"color": "#aab4c5", "size": 14}},
+        gauge={
+            "axis": {"range": [0, mx], "tickcolor": "#55607a",
+                     "tickfont": {"color": "#8893a8", "size": 9}},
+            "bar": {"color": color, "thickness": 0.28},
+            "bgcolor": "rgba(0,0,0,0)",
+            "borderwidth": 1, "bordercolor": "#262e3f",
+            "steps": [
+                {"range": [0, mx * 0.5], "color": "#1a2030"},
+                {"range": [mx * 0.5, mx * 0.8], "color": "#222a3a"},
+                {"range": [mx * 0.8, mx], "color": "#2b3447"},
+            ],
+            "threshold": {"line": {"color": color, "width": 3},
+                          "thickness": 0.8, "value": float(value or 0)},
+        },
+    ))
+    fig.update_layout(height=210, margin=dict(l=15, r=15, t=45, b=10),
+                      paper_bgcolor="rgba(0,0,0,0)", font={"color": "#e8eaed"})
+    return fig
+
+
 def user_picker(label="USER", key=None):
     # Normal user නම් තමන්ටම lock. Admin / Leader නම් (team එකෙන්) තෝරන්න පුළුවන්.
     df = _users()
@@ -135,8 +164,8 @@ def df_show(df: pd.DataFrame, n=200, scope=True):
 
 
 # ───────────────────────── connect ─────────────────────────
-st.sidebar.title("📊 EFL KPI System")
-st.sidebar.caption("CSS • Streamlit + Google Sheets")
+st.sidebar.title("📊 Central System Support Team")
+st.sidebar.caption("KPI System")
 
 try:
     gsheets.get_spreadsheet()
@@ -225,6 +254,8 @@ if IS_ADMIN:
     ]
 else:
     PAGES = ["🏠 Dashboard", "📝 Transaction", "🕐 Attendance", "💰 Incentive", "📤 Upload"]
+    if IS_LEADER:
+        PAGES.insert(4, "🔍 Audit")   # leader -> team Audit
 
 page = st.sidebar.radio("Menu", PAGES, label_visibility="collapsed")
 
@@ -296,7 +327,9 @@ elif page == "🏠 Dashboard":
         st.info("තවම data නෑ. 📝 Transaction / 🕐 Attendance වලින් දාන්න.")
     else:
         months = sorted(summ_all["MONTH"].unique(), reverse=True)
-        msel = st.selectbox("මාසය", months)
+        cur = dt.date.today().strftime("%Y-%m")
+        idx = months.index(cur) if cur in months else 0   # current month default
+        msel = st.selectbox("මාසය", months, index=idx)
         summ = summ_all[summ_all["MONTH"] == msel].drop(columns=["MONTH"])
 
         m1, m2, m3, m4 = st.columns(4)
@@ -310,40 +343,42 @@ elif page == "🏠 Dashboard":
                   "TOTAL REV", "INCENTIVE", "COST"]],
             use_container_width=True, hide_index=True,
         )
-        st.caption("ℹ️ **Cost** = incentive payout (company එකට යන වියදම) කියලා "
-                   "assume කරලා. වෙනත් cost basis එකක් (උදා: OT wage) තියෙනවා නම් කියන්න.")
-
-        st.subheader("👤 User එක අනුව Revenue")
-        st.bar_chart(summ.set_index("USER NAME")["TOTAL REV"].sort_values(ascending=False).head(15))
 
         st.subheader("📈 මාසික Revenue trend")
         trend = summ_all.groupby("MONTH")["TOTAL REV"].sum()
         st.line_chart(trend)
 
-    # ── Company-wide graphs (current month) — හැම user කෙනෙක්ටම ──
+    # ── Company-wide meters (current month) — හැම user කෙනෙක්ටම ──
     st.divider()
     this_month = dt.date.today().strftime("%Y-%m")
     full_txn = gsheets.get_df("TRANSACTION")   # unscoped: company-wide
+
     st.subheader(f"🏢 SITE level — Transaction Volume ({this_month})")
     sv = calc.site_volume_month(full_txn, this_month)
     if sv.empty:
         st.info("මේ මාසෙට transactions නෑ.")
     else:
-        st.bar_chart(sv.set_index("SITE")["VOLUME"], color="#4da3ff")
+        mx = float(sv["VOLUME"].max())
+        cols = st.columns(min(len(sv), 4))
+        for i, (_, r) in enumerate(sv.iterrows()):
+            with cols[i % len(cols)]:
+                st.plotly_chart(gauge(r["VOLUME"], mx, r["SITE"], "#4da3ff"),
+                                use_container_width=True, key=f"sv_{i}")
 
     st.subheader(f"🏆 වැඩිම Transaction කරපු Top 5 ({this_month})")
     top5 = calc.top_users_volume(full_txn, this_month, 5)
     if top5.empty:
         st.info("මේ මාසෙට data නෑ.")
     else:
-        c_l, c_r = st.columns([3, 2])
-        with c_l:
-            st.bar_chart(top5.set_index("USER")["VOLUME"], color="#ffb454")
-        with c_r:
-            medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
-            for i, row in top5.iterrows():
-                st.markdown(f"### {medals[i] if i < 5 else ''} {row['USER']}")
-                st.caption(f"{row['VOLUME']:,.0f} transactions")
+        mx = float(top5["VOLUME"].max())
+        medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+        gcolors = ["#ffd700", "#c0c0c0", "#cd7f32", "#4da3ff", "#7c5cff"]
+        cols = st.columns(min(len(top5), 5))
+        for i, (_, r) in enumerate(top5.iterrows()):
+            with cols[i % len(cols)]:
+                st.plotly_chart(
+                    gauge(r["VOLUME"], mx, f"{medals[i]} {r['USER']}", gcolors[i]),
+                    use_container_width=True, key=f"top_{i}")
 
 
 # ═══════════════════════════ TRANSACTION ═══════════════════════════
@@ -679,11 +714,12 @@ elif page == "💵 Cost/Revenue":
 
 # ═══════════════════════════ AUDIT ═══════════════════════════
 elif page == "🔍 Audit":
-    st.header("🔍 Audit — Rule Violations")
+    st.header("🔍 Audit — Rule Violations"
+              + ("" if IS_ADMIN else " (ඔයාගේ team)"))
     try:
-        att = gsheets.get_df("ATTANDANCE")
-        txn = gsheets.get_df("TRANSACTION")
-        users = _users()
+        att = scope_df(gsheets.get_df("ATTANDANCE"))   # leader -> team scope
+        txn = scope_df(gsheets.get_df("TRANSACTION"))
+        users = scope_df(_users())
     except Exception:
         st.info("මුලින් Setup එකෙන් sheets create කරන්න.")
         st.stop()
@@ -691,7 +727,7 @@ elif page == "🔍 Audit":
 
     tabs = st.tabs([
         "🚫 20hr+ Cap", "📅 Holiday/Sunday", "⏱️ OT w/o Txn",
-        "📈 Weekly OT 15+", "❓ Missing Txn",
+        "📈 Weekly OT 15+", "📊 Monthly OT 60+", "❓ Missing Txn",
     ])
 
     # 1) Working hours > 20 without approval
@@ -716,7 +752,8 @@ elif page == "🔍 Audit":
 
     # 3) OT worked but no OT transaction
     with tabs[2]:
-        st.caption("Scheduled time එකට වඩා වැඩ කරලා, ඒ දවසට OT-N/OT-D transaction නැති.")
+        st.caption("Scheduled time එකට වඩා වැඩ කරලා, ඒ දවසට OT-N/OT-D transaction "
+                   "(එක line එකක් හරි) නැති.")
         d3 = calc.audit_ot_without_transaction(att, txn, holidays)
         if d3.empty:
             st.success("✅ හැම OT එකකටම transaction තියෙනවා.")
@@ -737,8 +774,18 @@ elif page == "🔍 Audit":
             st.error(f"⚠️ {len(d4)} user-weeks.")
             st.dataframe(style_flag(d4, "#ffd6d6"), use_container_width=True, hide_index=True)
 
-    # 5) Missing transactions for a date
+    # 5) Monthly OT > 60
     with tabs[4]:
+        st.caption(f"මාසෙකට # OF OT HRS > {schema.MONTHLY_OT_CAP}.")
+        d6 = calc.audit_monthly_ot(att)
+        if d6.empty:
+            st.success("✅ මාසික OT cap එක ඉක්මවලා නෑ.")
+        else:
+            st.error(f"⚠️ {len(d6)} user-months — මාසික OT 60+ ඉක්මවලා.")
+            st.dataframe(style_flag(d6, "#ffccd5"), use_container_width=True, hide_index=True)
+
+    # 6) Missing transactions for a date
+    with tabs[5]:
         adate = st.date_input("දිනය", dt.date.today(), key="audit_missing_date")
         d5 = calc.audit_missing_transactions(users, txn, adate)
         if d5.empty:

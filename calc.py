@@ -384,6 +384,30 @@ def audit_weekly_ot(att_df: pd.DataFrame) -> pd.DataFrame:
         "WEEKLY OT HRS", ascending=False)
 
 
+def audit_monthly_ot(att_df: pd.DataFrame) -> pd.DataFrame:
+    """මාසෙකට OT පැය 60+ ගිය user-month combinations."""
+    if att_df.empty or "# OF OT HRS" not in att_df:
+        return pd.DataFrame()
+    recs = []
+    for _, a in att_df.iterrows():
+        d = _to_date(a.get("DATE"))
+        if d is None:
+            continue
+        recs.append({
+            "USER ID": str(a.get("USER ID", "")).strip(),
+            "USER NAME": a.get("USER NAME", ""),
+            "MONTH": _month_key(d),
+            "OT": _f(a.get("# OF OT HRS")),
+        })
+    if not recs:
+        return pd.DataFrame()
+    g = pd.DataFrame(recs).groupby(
+        ["USER ID", "USER NAME", "MONTH"], as_index=False)["OT"].sum()
+    g = g.rename(columns={"OT": "MONTHLY OT HRS"})
+    return g[g["MONTHLY OT HRS"] > schema.MONTHLY_OT_CAP].sort_values(
+        "MONTHLY OT HRS", ascending=False)
+
+
 def audit_missing_transactions(user_df: pd.DataFrame, txn_df: pd.DataFrame,
                                date_val) -> pd.DataFrame:
     """අදාළ දිනයට TRANSACTION එකක් add කරලා නැති active users."""
@@ -714,6 +738,8 @@ def cost_revenue_report(att_df, txn_df, salary_df, user_df, holidays, month):
             "REVENUE NORMAL": round(rv["n"], 2),
             "REVENUE OT-N": round(rv["otn"], 2),
             "REVENUE OT-D": round(rv["otd"], 2),
+            "OT-N VARIANCE": round(rv["otn"] - otn_amt, 2),
+            "OT-D VARIANCE": round(rv["otd"] - otd_amt, 2),
             "TOTAL REVENUE": total_rev,
             "MARGIN": round(total_rev - cost, 2),
         })
@@ -721,7 +747,7 @@ def cost_revenue_report(att_df, txn_df, salary_df, user_df, holidays, month):
             "OT-D HRS", "BASIC SALARY", "OT-N AMOUNT", "OT-D AMOUNT",
             "FIXED INCENTIVE", "TOTAL GROSS", "EPF", "ETF", "CONTRACTOR FEE",
             "COST TO COMPANY", "REVENUE NORMAL", "REVENUE OT-N", "REVENUE OT-D",
-            "TOTAL REVENUE", "MARGIN"]
+            "OT-N VARIANCE", "OT-D VARIANCE", "TOTAL REVENUE", "MARGIN"]
     return pd.DataFrame(rows, columns=cols)
 
 
