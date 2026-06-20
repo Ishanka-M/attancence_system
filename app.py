@@ -68,6 +68,25 @@ div[data-testid="stDataFrame"] { border-radius:12px; overflow:hidden;
 div[data-baseweb="select"]>div, .stTextInput input, .stNumberInput input,
 .stDateInput input { border-radius:9px !important; }
 hr { border-color:var(--line); }
+/* footer brand */
+.brand-foot { text-align:center; color:#6b7588; font-size:12px; padding:10px 0 4px;
+    border-top:1px solid var(--line); margin-top:14px; }
+.brand-foot b { color:#8fa6c8; }
+
+/* ───────── Mobile responsive ───────── */
+@media (max-width: 680px){
+    .block-container { padding:1rem .6rem 3rem; }
+    h1 { font-size:1.45rem; } h2 { font-size:1.2rem; } h3 { font-size:1.05rem; }
+    div[data-testid="stMetric"] { padding:10px 12px; border-radius:12px; }
+    div[data-testid="stMetricValue"] { font-size:1.15rem; }
+    div[data-testid="stMetricLabel"] { font-size:.72rem; }
+    /* columns -> wrap (2 per row) instead of squeezing side-by-side */
+    div[data-testid="stHorizontalBlock"] { flex-wrap:wrap; gap:.45rem; }
+    div[data-testid="stHorizontalBlock"]>div[data-testid="column"] {
+        min-width:47% !important; flex:1 1 47% !important;
+    }
+    button[data-baseweb="tab"] { font-size:.8rem; padding:0 8px; }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -263,6 +282,11 @@ else:
         PAGES.insert(4, "🔍 Audit")   # leader -> team Audit
 
 page = st.sidebar.radio("Menu", PAGES, label_visibility="collapsed")
+
+# ── footer brand ──
+st.sidebar.markdown(
+    "<div class='brand-foot'>Development by <b>Ishanka Madusanka</b></div>",
+    unsafe_allow_html=True)
 
 
 # ═══════════════════════════ SETUP ═══════════════════════════
@@ -980,13 +1004,26 @@ elif page == "📤 Upload":
             ], index=1)
 
             to_add = save_df if mode.startswith("ඔක්කොම") else save_df[~pending_mask]
+
+            # ── duplicate UNIC CODE skip (දෙපාරක් upload වැළැක්වීම) ──
+            dedup = st.checkbox("දැනටමත් තියෙන UNIC CODE rows skip කරන්න", value=True)
+            n_dup = 0
+            if dedup and not existing.empty and "UNIC CODE" in existing:
+                exist_codes = set(existing["UNIC CODE"].astype(str).str.strip())
+                before = len(to_add)
+                to_add = to_add[~to_add["UNIC CODE"].astype(str).str.strip().isin(exist_codes)]
+                n_dup = before - len(to_add)
+                if n_dup:
+                    st.info(f"ℹ️ දැනටමත් තියෙන {n_dup} rows (UNIC CODE duplicate) skip කරනවා.")
+
             st.subheader(f"Add වෙන {len(to_add)} rows (preview)")
             st.dataframe(to_add.head(50), use_container_width=True, hide_index=True)
 
             if len(to_add) and st.button(f"⬆️ {len(to_add)} rows add කරන්න", type="primary"):
                 gsheets.append_rows("ATTANDANCE", to_add.fillna("").astype(str).values.tolist())
                 st.success(f"{len(to_add)} rows add කළා ✅"
-                           + (f" ({n_pending} PENDING — approve කරන්න)" if mode.startswith("ඔක්කොම") and n_pending else ""))
+                           + (f" · {n_dup} duplicate skip" if n_dup else "")
+                           + (f" · {n_pending} PENDING" if mode.startswith("ඔක්කොම") and n_pending else ""))
                 st.cache_data.clear()
 
 
@@ -1127,3 +1164,9 @@ elif page == "🗂️ Data Manager":
     if mkey == "TCODE-M":
         st.info("ℹ️ TCODE-M = මුල් Excel එකේ *Master sheet - Finalized* (SMV/rate engine). "
                 "rate column වෙනස් කළාම ඊට පස්සේ එන transactions වලට ඒ අගයම apply වෙනවා.")
+
+
+# ───────────────────────── footer brand (every page) ─────────────────────────
+st.markdown(
+    "<div class='brand-foot'>Development by <b>Ishanka Madusanka</b></div>",
+    unsafe_allow_html=True)
