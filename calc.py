@@ -33,8 +33,10 @@ def _f(x, default=0.0) -> float:
 
 def _to_date(x):
     """ISO string / date / Excel-serial -> datetime.date (බැරිනම් None)."""
-    if isinstance(x, dt.date):
+    if isinstance(x, dt.date) and not isinstance(x, dt.datetime):
         return x
+    if isinstance(x, dt.datetime):
+        return x.date()
     s = str(x).strip()
     if not s:
         return None
@@ -50,6 +52,75 @@ def _to_date(x):
         except ValueError:
             continue
     return None
+
+
+def _to_datetime(x):
+    """datetime string -> datetime (බැරිනම් None). 'YYYY-MM-DD HH:MM:SS' වැනි."""
+    if isinstance(x, dt.datetime):
+        return x
+    s = str(x).strip()
+    if not s:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%m/%d/%Y %H:%M:%S",
+                "%m/%d/%Y %H:%M", "%d/%m/%Y %H:%M:%S", "%d/%m/%Y %H:%M",
+                "%H:%M:%S", "%H:%M"):
+        try:
+            return dt.datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def hours_between(in_str, out_str) -> float:
+    """IN / OUT අතර පැය ගණන. රෑ පහුවෙනවා නම් (out < in) පැය 24ක් එකතු කරනවා."""
+    a, b = _to_datetime(in_str), _to_datetime(out_str)
+    if a is None or b is None:
+        return 0.0
+    diff = (b - a).total_seconds() / 3600.0
+    if diff < 0:
+        diff += 24
+    return round(diff, 4)
+
+
+def compute_work_hours(in_str, out_str, lunch=1.0) -> float:
+    """# OF WORKING HRS = (OUT − IN) − LUNCH & TEA. (lunch default 1)"""
+    gross = hours_between(in_str, out_str)
+    return round(max(gross - _f(lunch, 1.0), 0.0), 4)
+
+
+def compute_attendance(date_val, in_str, out_str, lunch, utilized_hours, holidays):
+    """IN/OUT + lunch + utilized වලින් working/ot/scheduled/utilization ගණනය."""
+    wh = compute_work_hours(in_str, out_str, lunch)
+    sched = scheduled_hours(date_val, holidays)
+    ot = round(max(wh - sched, 0.0), 4)
+    util = calc_attendance_utilization(utilized_hours, wh)
+    return {"working": wh, "ot": ot, "sched": round(sched, 2), "utilization": util}
+
+
+def team_user_ids(user_df: pd.DataFrame, leader_uid: str) -> set:
+    """
+    Leader කෙනෙක්ට පේන USER ID set එක:
+      තමන් + SUPERVISOR ID = leader වෙච්ච හැම user කෙනෙක්ම (recursive, multi-level).
+    """
+    leader_uid = str(leader_uid).strip()
+    allowed = {leader_uid}
+    if user_df is None or user_df.empty or \
+       "SUPERVISOR ID" not in user_df or "USER ID" not in user_df:
+        return allowed
+    reports = {}
+    for _, r in user_df.iterrows():
+        sup = str(r.get("SUPERVISOR ID", "")).strip()
+        uid = str(r.get("USER ID", "")).strip()
+        if sup and uid:
+            reports.setdefault(sup, []).append(uid)
+    queue = [leader_uid]
+    while queue:
+        cur = queue.pop()
+        for child in reports.get(cur, []):
+            if child not in allowed:
+                allowed.add(child)
+                queue.append(child)
+    return allowed
 
 
 def _week_key(d: dt.date) -> str:
@@ -433,47 +504,70 @@ def filter_by_range(df: pd.DataFrame, date_col: str, start, end,
 
 # ═══════════════════ UPLOAD validation (rules apply on bulk add) ═══════════════════
 def validate_attendance_upload(df: pd.DataFrame, existing_att: pd.DataFrame,
-                               holidays: set):
+                               holidays: set, txn_df: pd.DataFrame = None,
+                               user_df: pd.DataFrame = None):
     """
-    Excel/CSV එකෙන් එන ATTANDANCE rows වලට rules apply කරනවා:
-      • # OF WORKING HRS > 20  -> APPROVAL STATUS = PENDING
-      • නිවාඩු/ඉරිදා දවසට       -> APPROVAL STATUS = PENDING
-      • සතියට OT > 15           -> Weekly-OT warning (existing + new combined)
-    SCHEDULED HRS, UTILIZATION recompute කරනවා, UNIC CODE නැත්නම් හදනවා.
-    return: (save_df, display_df)  — display_df එකේ '⚠ VIOLATION' column එකක් තියෙනවා.
+    Upload කරන ATTANDANCE rows වල **ඉතුරු columns calculate කරනවා** + rules check:
+      • # OF WORKING HRS = (OUT − IN) − LUNCH & TEA(1)
+      • # OF OT HRS      = max(WORKING − SCHEDULED, 0)
+      • SCHEDULED HRS    = schedule (8/5/0)
+      • UTILIZED HOURS   = ඒ user+date එකට TRANSACTION වල UTILIZE HOURS එකතුව
+      • UTILIZATION      = UTILIZED ÷ WORKING
+      • USER NAME / DEPARTMENT / SUB DEPARTMENT  -> USER-M වලින්
+      • Day, UNIC CODE
+    Rules: WORKING > 20 හෝ නිවාඩු/ඉරිදා -> APPROVAL STATUS = PENDING.
+    return: (save_df, display_df)  display එකේ '⚠ VIOLATION' column.
     """
     H = schema.SHEETS["ATTANDANCE"]["headers"]
-    out = pd.DataFrame({h: (df[h] if h in df.columns else "") for h in H})
+    out = pd.DataFrame({h: (df[h] if h in df.columns else "") for h in H}).astype(object)
 
-    scheds, statuses, notes = [], [], []
-    for _, r in out.iterrows():
-        wh = _f(r["# OF WORKING HRS"])
-        d = r["DATE"]
-        sched = scheduled_hours(d, holidays)
-        needs, reason = attendance_needs_approval(wh, d, holidays)
-        scheds.append(round(sched, 2))
-        statuses.append(schema.APPR_PENDING if needs else schema.APPR_OK)
-        notes.append(reason)
-    out["SCHEDULED HRS"] = scheds
-    out["APPROVAL STATUS"] = statuses
-    out["APPROVAL NOTE"] = notes
-    out["UTILIZATION"] = [
-        calc_attendance_utilization(r["UTILIZED HOURS"], r["# OF WORKING HRS"])
-        for _, r in out.iterrows()
-    ]
-    # UNIC CODE
+    # lookups
+    user_lut = {}
+    if user_df is not None and not user_df.empty and "USER ID" in user_df:
+        for _, u in user_df.iterrows():
+            user_lut[str(u.get("USER ID", "")).strip()] = (
+                u.get("USER NAME", ""), u.get("DEPARTMENT", ""),
+                u.get("SUB DEPARTMENT", ""))
+    util_lut = {}
+    if txn_df is not None and not txn_df.empty and \
+       {schema.T_USER, schema.T_DATE, schema.T_UTIL} <= set(txn_df.columns):
+        for _, t in txn_df.iterrows():
+            d = _to_date(t.get(schema.T_DATE))
+            if d is None:
+                continue
+            key = (str(t.get(schema.T_USER, "")).strip(), d.isoformat())
+            util_lut[key] = util_lut.get(key, 0.0) + _f(t.get(schema.T_UTIL))
+
     for i in out.index:
-        if not str(out.at[i, "UNIC CODE"]).strip():
-            d = _to_date(out.at[i, "DATE"])
-            uid = str(out.at[i, "USER ID"]).strip()
-            if d and uid:
-                out.at[i, "UNIC CODE"] = d.strftime("%Y%m%d") + uid
+        uid = str(out.at[i, "USER ID"]).strip()
+        d = _to_date(out.at[i, "DATE"])
+        diso = d.isoformat() if d else ""
+        lunch = _f(out.at[i, "LUNCH & TEA"], 1.0) or 1.0
+        res = compute_attendance(out.at[i, "DATE"], out.at[i, "IN DATE & TIME"],
+                                 out.at[i, "OUT DATE & TIME"], lunch,
+                                 util_lut.get((uid, diso), 0.0), holidays)
+        out.at[i, "LUNCH & TEA"] = lunch
+        out.at[i, "# OF WORKING HRS"] = res["working"]
+        out.at[i, "# OF OT HRS"] = res["ot"]
+        out.at[i, "SCHEDULED HRS"] = res["sched"]
+        out.at[i, "UTILIZED HOURS"] = round(util_lut.get((uid, diso), 0.0), 4)
+        out.at[i, "UTILIZATION"] = res["utilization"]
+        if d:
+            out.at[i, "Day"] = d.strftime("%a").upper()
+        name, dept, sub = user_lut.get(uid, ("", "", ""))
+        out.at[i, "USER NAME"] = out.at[i, "USER NAME"] or name
+        out.at[i, "DEPARTMENT"] = out.at[i, "DEPARTMENT"] or dept
+        out.at[i, "SUB DEPARTMENT"] = out.at[i, "SUB DEPARTMENT"] or sub
+        # approval
+        needs, reason = attendance_needs_approval(res["working"], out.at[i, "DATE"], holidays)
+        out.at[i, "APPROVAL STATUS"] = schema.APPR_PENDING if needs else schema.APPR_OK
+        out.at[i, "APPROVAL NOTE"] = reason
+        if not str(out.at[i, "UNIC CODE"]).strip() and d and uid:
+            out.at[i, "UNIC CODE"] = d.strftime("%Y%m%d") + uid
 
-    # weekly OT (existing + new combined)
-    if existing_att is not None and not existing_att.empty:
-        combined = pd.concat([existing_att, out], ignore_index=True)
-    else:
-        combined = out
+    # weekly OT highlight (existing + new)
+    combined = pd.concat([existing_att, out], ignore_index=True) \
+        if (existing_att is not None and not existing_att.empty) else out
     wk = audit_weekly_ot(combined)
     over = set(zip(wk["USER ID"].astype(str), wk["WEEK"])) if not wk.empty else set()
 

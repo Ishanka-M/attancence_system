@@ -57,25 +57,30 @@ def style_flag(df: pd.DataFrame, color="#ffd6d6"):
 
 
 def user_picker(label="USER", key=None):
-    # User role නම් තමන්ටම lock — admin නම් විතරක් තෝරන්න පුළුවන්
-    if not IS_ADMIN and CURRENT_UID:
+    # Normal user නම් තමන්ටම lock. Admin / Leader නම් (team එකෙන්) තෝරන්න පුළුවන්.
+    df = _users()
+    if not IS_ADMIN and not IS_LEADER and CURRENT_UID:
         st.caption(f"👤 {CURRENT_UID} — {CURRENT_UNAME}")
         return CURRENT_UID, CURRENT_UNAME
-    df = _users()
     if df.empty:
         st.warning("USER-M හිස්. මුලින් Setup එකෙන් sheets create කරන්න.")
         return None, None
+    if not IS_ADMIN and ALLOWED_UIDS is not None:  # leader -> team විතරක්
+        df = df[df["USER ID"].astype(str).str.strip().isin(ALLOWED_UIDS)]
     opts = {f'{r["USER ID"]} — {r["USER NAME"]}': (r["USER ID"], r["USER NAME"])
             for _, r in df.iterrows() if str(r.get("USER ID", "")).strip()}
+    if not opts:
+        st.caption(f"👤 {CURRENT_UID} — {CURRENT_UNAME}")
+        return CURRENT_UID, CURRENT_UNAME
     sel = st.selectbox(label, list(opts.keys()), key=key)
     return opts[sel]
 
 
 def scope_df(df: pd.DataFrame) -> pd.DataFrame:
-    """User role නම් තමන්ගේ USER ID data විතරක්. Admin නම් සම්පූර්ණ data."""
-    if IS_ADMIN or df is None or df.empty or "USER ID" not in df:
+    """Admin -> සියල්ල. Leader -> team. User -> තමන් විතරක්. (USER ID අනුව)"""
+    if IS_ADMIN or ALLOWED_UIDS is None or df is None or df.empty or "USER ID" not in df:
         return df
-    return df[df["USER ID"].astype(str).str.strip() == CURRENT_UID]
+    return df[df["USER ID"].astype(str).str.strip().isin(ALLOWED_UIDS)]
 
 
 def df_show(df: pd.DataFrame, n=200, scope=True):
@@ -146,8 +151,17 @@ IS_ADMIN = ss.role == "admin"
 CURRENT_UID = ss.uid
 CURRENT_UNAME = ss.uname
 
+# ── Leader scope: තමන් + assign කරපු team (SUPERVISOR ID අනුව) ──
+ALLOWED_UIDS = None  # None = සියල්ල (admin)
+IS_LEADER = False
+if not IS_ADMIN:
+    ALLOWED_UIDS = calc.team_user_ids(_users(), CURRENT_UID)
+    IS_LEADER = len(ALLOWED_UIDS) > 1
+
 # ── sidebar: who + logout ──
-st.sidebar.success(("🛡️ Admin" if IS_ADMIN else f"👤 {CURRENT_UID}") + " logged in")
+_who = "🛡️ Admin" if IS_ADMIN else (f"👔 Leader ({len(ALLOWED_UIDS)} team)"
+                                     if IS_LEADER else f"👤 {CURRENT_UID}")
+st.sidebar.success(_who + " logged in")
 if st.sidebar.button("Logout"):
     ss.role, ss.uid, ss.uname = None, "", ""
     st.rerun()
@@ -326,35 +340,46 @@ elif page == "🕐 Attendance":
             out_t = st.time_input("OUT TIME", dt.time(17, 0))
         with c3:
             loc = st.selectbox("WORK LOCATION", loc_opts)
-            lunch = st.number_input("LUNCH & TEA (hrs)", 0.0, 5.0, 1.0, 0.25)
+            lunch = st.number_input("LUNCH & TEA (hrs)", 0.0, 5.0,
+                                    float(schema.LUNCH_TEA_HOURS), 0.25)
 
-        c4, c5, c6 = st.columns(3)
-        wh = c4.number_input("# OF WORKING HRS", 0.0, step=0.5)
-        ot = c5.number_input("# OF OT HRS", 0.0, step=0.5)
-        util_hrs = c6.number_input("UTILIZED HOURS", 0.0, step=0.5,
-                                   help="TRANSACTION වලින් එන utilize hours")
+        # ── auto-compute: WORKING = (OUT−IN) − LUNCH, OT = WORKING − SCHEDULED ──
+        in_dt = dt.datetime.combine(date_v, in_t)
+        out_dt = dt.datetime.combine(date_v, out_t)
+        if out_dt < in_dt:
+            out_dt += dt.timedelta(days=1)   # රෑ පහුවෙනවා නම්
+        res = calc.compute_attendance(date_v, in_dt.isoformat(" "),
+                                      out_dt.isoformat(" "), lunch, 0, holidays)
+        wh, ot, sched = res["working"], res["ot"], res["sched"]
+
+        i1, i2, i3, i4 = st.columns(4)
+        i1.metric("Working HRS", f"{wh:.2f}", help="(OUT − IN) − LUNCH & TEA")
+        i2.metric("OT HRS", f"{ot:.2f}")
+        i3.metric("Scheduled", f"{sched:.0f}")
+        i4.metric("Day", date_v.strftime("%a"))
         remark = st.text_input("REMARK", "")
 
-        # ── live schedule / rule info ──
-        sched = calc.scheduled_hours(date_v, holidays)
         needs_appr, reason = calc.attendance_needs_approval(wh, date_v, holidays)
-        i1, i2, i3 = st.columns(3)
-        i1.metric("Scheduled HRS", f"{sched:.0f}")
-        i2.metric("Day", date_v.strftime("%a"))
-        i3.metric("Cap", f"{schema.WORKING_HRS_CAP}")
         if needs_appr:
             st.warning(f"⚠️ Approval ඕනේ: {reason}. "
-                       + ("Admin නිසා approve කරලා save කරයි." if IS_ADMIN
-                          else "PENDING විදිහට save වෙයි — admin approve කරන්න ඕනේ."))
+                       + ("Admin නිසා approve වෙයි." if IS_ADMIN
+                          else "PENDING විදිහට save වෙයි."))
         submitted = st.form_submit_button("➕ Add Attendance", type="primary")
 
     if submitted and uid:
+        # UTILIZED HOURS = ඒ user+date එකට TRANSACTION වල utilize එකතුව
+        tdf = gsheets.get_df("TRANSACTION")
+        util_hrs = 0.0
+        if not tdf.empty and {"USER ID", "Date", "UTILIZE HOURS"} <= set(tdf.columns):
+            for _, t in tdf.iterrows():
+                td = calc._to_date(t.get("Date"))
+                if td == date_v and str(t.get("USER ID", "")).strip() == uid:
+                    util_hrs += calc._f(t.get("UTILIZE HOURS"))
         util = calc.calc_attendance_utilization(util_hrs, wh)
         udf = _users()
         urow = udf[udf["USER ID"] == uid]
         dept = urow["DEPARTMENT"].iloc[0] if not urow.empty else ""
         subdept = urow["SUB DEPARTMENT"].iloc[0] if not urow.empty and "SUB DEPARTMENT" in urow else ""
-        needs_appr, reason = calc.attendance_needs_approval(wh, date_v, holidays)
         if not needs_appr:
             status, note = schema.APPR_OK, ""
         elif IS_ADMIN:
@@ -363,15 +388,16 @@ elif page == "🕐 Attendance":
             status, note = schema.APPR_PENDING, reason
         row = [
             unic(date_v, uid), date_v.isoformat(), uid, uname, dept, subdept,
-            in_t.strftime("%H:%M"), out_t.strftime("%H:%M"), lunch, loc, "",
-            wh, ot, "", "", "", util_hrs, util, date_v.strftime("%a").upper(),
+            in_dt.strftime("%Y-%m-%d %H:%M"), out_dt.strftime("%Y-%m-%d %H:%M"),
+            lunch, loc, "", round(wh, 2), round(ot, 2), "", "", "",
+            round(util_hrs, 2), util, date_v.strftime("%a").upper(),
             remark, "", sched, status, note,
         ]
         gsheets.append_rows("ATTANDANCE", [row])
         if status == schema.APPR_PENDING:
-            st.warning(f"PENDING විදිහට save කළා ⏳ — Admin approve කරන තුරු valid නෑ. ({reason})")
+            st.warning(f"PENDING විදිහට save කළා ⏳ ({reason})")
         else:
-            st.success(f"Added ✅  Utilization {util:.1%}  ·  Status: {status}")
+            st.success(f"Added ✅  Working {wh:.2f}h · OT {ot:.2f}h · Util {util:.1%}")
         st.cache_data.clear()
 
     st.divider()
@@ -673,31 +699,37 @@ elif page == "📤 Upload":
         raw = raw.fillna("")
         st.write(f"කියෙව්වා: {len(raw)} rows")
 
-        # User role නම් තමන්ගේ USER ID එකට විතරක් scope කරනවා
-        if not IS_ADMIN:
+        # Scope: normal user -> තමන්, leader -> team, admin -> ඕනෑම
+        if not IS_ADMIN and ALLOWED_UIDS is not None:
             if "USER ID" not in raw.columns:
                 raw["USER ID"] = CURRENT_UID
             else:
                 raw["USER ID"] = raw["USER ID"].apply(
                     lambda x: CURRENT_UID if not str(x).strip() else str(x).strip())
-            other = raw[raw["USER ID"] != CURRENT_UID]
+            other = raw[~raw["USER ID"].isin(ALLOWED_UIDS)]
             if len(other):
-                st.warning(f"⚠️ ඔයාගේ USER ID ({CURRENT_UID}) නොවන rows {len(other)}ක් "
-                           "skip කරනවා — user ලට තමන්ගේ data විතරක් upload කරන්න පුළුවන්.")
-            raw = raw[raw["USER ID"] == CURRENT_UID]
+                st.warning(f"⚠️ ඔයාට අදාළ නොවන USER ID rows {len(other)}ක් skip කරනවා — "
+                           + ("team එකේ users ට විතරක් upload කරන්න පුළුවන්."
+                              if IS_LEADER else "තමන්ගේ data විතරක් upload කරන්න පුළුවන්."))
+            raw = raw[raw["USER ID"].isin(ALLOWED_UIDS)]
             if raw.empty:
-                st.info("Upload කරන්න ඔයාගේ rows නෑ.")
+                st.info("Upload කරන්න rows නෑ.")
                 st.stop()
 
         # ─────────────── TRANSACTION ───────────────
         if target == "TRANSACTION":
             lut = calc.build_tcode_lookup(_tcodes())
-            aligned = pd.DataFrame({h: (raw[h] if h in raw.columns else "") for h in headers})
+            udf = _users()
+            uname_lut = {str(r["USER ID"]).strip(): r.get("USER NAME", "")
+                         for _, r in udf.iterrows()} if not udf.empty else {}
+            aligned = pd.DataFrame({h: (raw[h] if h in raw.columns else "") for h in headers}).astype(object)
             # calculated fields recompute
             for i in aligned.index:
                 code = str(aligned.at[i, "T-CODE"]).strip()
                 info = lut.get(code, {})
                 res = calc.calc_transaction(info, aligned.at[i, "TIME"], aligned.at[i, "# OF TRANSACTION"])
+                uid = str(aligned.at[i, "USER ID"]).strip()
+                aligned.at[i, "USER NAME"] = aligned.at[i, "USER NAME"] or uname_lut.get(uid, "")
                 aligned.at[i, "CSSTR00"] = aligned.at[i, "CSSTR00"] or info.get("desc", "")
                 aligned.at[i, "UOM"] = aligned.at[i, "UOM"] or info.get("uom", "")
                 aligned.at[i, "SMV"] = res["smv"]
@@ -734,7 +766,9 @@ elif page == "📤 Upload":
         # ─────────────── ATTANDANCE ───────────────
         else:
             existing = gsheets.get_df("ATTANDANCE")
-            save_df, disp = calc.validate_attendance_upload(raw, existing, holidays)
+            save_df, disp = calc.validate_attendance_upload(
+                raw, existing, holidays,
+                txn_df=gsheets.get_df("TRANSACTION"), user_df=_users())
             viol_mask = disp["⚠ VIOLATION"].astype(str).str.len() > 0
             pending_mask = save_df["APPROVAL STATUS"] == schema.APPR_PENDING
             n_pending = int(pending_mask.sum())
@@ -814,10 +848,31 @@ elif page == "🛡️ Admin":
         st.caption("මෙතන දාන දවස් වලට scheduled hours = 0. ඒ දවස් වලට attendance "
                    "දාන්න admin approval ඕනේ වෙයි.")
         hdf = gsheets.get_df("HOLIDAY-M")
+
+        # ── calendar date picker එකෙන් add ──
+        st.markdown("**📅 අලුත් නිවාඩුවක් add කරන්න**")
+        h1, h2, h3, h4 = st.columns([2, 3, 2, 1])
+        hdate = h1.date_input("දිනය", dt.date.today(), key="hol_date")
+        hdesc = h2.text_input("Description", key="hol_desc")
+        htype = h3.selectbox("TYPE", ["Public", "Mercantile", "Special", "Bank"],
+                             key="hol_type")
+        h4.markdown("<br>", unsafe_allow_html=True)
+        if h4.button("➕ Add"):
+            iso = hdate.isoformat()
+            existing_dates = set(hdf["DATE"].apply(lambda x: (calc._to_date(x) or "")
+                                 and calc._to_date(x).isoformat()) ) if not hdf.empty and "DATE" in hdf else set()
+            if iso in existing_dates:
+                st.warning("ඒ දිනය දැනටමත් තියෙනවා.")
+            else:
+                gsheets.append_rows("HOLIDAY-M", [[iso, hdesc, htype]])
+                st.success(f"{iso} නිවාඩුව add කළා ✅")
+                st.cache_data.clear()
+                st.rerun()
+
+        st.divider()
+        st.markdown("**දැනට තියෙන නිවාඩු දවස්** (table එකේ edit / delete කරන්නත් පුළුවන්)")
         edited = st.data_editor(hdf, num_rows="dynamic", use_container_width=True,
-                                hide_index=True, key="hol_ed",
-                                column_config={"DATE": st.column_config.TextColumn(
-                                    "DATE (YYYY-MM-DD)")})
+                                hide_index=True, key="hol_ed")
         if st.button("💾 Holidays save", type="primary"):
             gsheets.overwrite("HOLIDAY-M", edited)
             st.success("HOLIDAY-M update කළා ✅")

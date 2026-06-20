@@ -9,11 +9,22 @@ GitHub එකට push කරලා **Streamlit Cloud** එකේ free deploy ක
 ## ✨ විශේෂාංග
 
 ### 🔐 Login & Roles
-- **👤 User login** — USER ID එකෙන් log වෙනවා. තමන්ගේ USER ID එකට අදාළ
-  data විතරක් (Dashboard, Transaction, Attendance, Incentive) පේනවා.
-  Admin password set කරලා නැත්නම් password හිස්ව log වෙන්න පුළුවන්.
-- **🛡️ Admin login** — `admin_pin` එකෙන්. **සම්පූර්ණ data + reports + audit +
-  uploads + master CRUD** ඔක්කොම පේනවා.
+- **👤 User** — USER ID එකෙන් log වෙනවා. තමන්ගේ data විතරක්.
+- **👔 Leader** — USER-M එකේ **SUPERVISOR ID** = ඒ leader ගේ USER ID විදිහට users
+  assign කළාම, leader log වුණාම **තමන්ගේ team එකේ හැම user කෙනෙක්ගේම data**
+  (recursive, multi-level) පේනවා + ඔවුන් වෙනුවෙන් entry/upload කරන්න පුළුවන්.
+  *(Assign කරන්නේ Admin → Data Manager → USER-M → SUPERVISOR ID column එකෙන්.)*
+- **🛡️ Admin** — `admin_pin` එකෙන්. සම්පූර්ණ data + reports + audit + upload + CRUD.
+
+### 📤 Bulk Upload — system එකෙන් calculate වෙනවා
+අවම columns දාලා upload කළාම ඉතුරු ඔක්කොම **auto-calculate** වෙනවා:
+- **TRANSACTION** (`Date, USER ID, SITE, CUSTOMMER, T-CODE, TIME, # OF TRANSACTION`)
+  → USER NAME, Description, UOM, SMV, UTILIZE HOURS, REVANUE, In compute.
+  T-CODE/TIME/qty invalid rows **block**.
+- **ATTANDANCE** (`UNIC CODE, DATE, USER ID, IN DATE & TIME, OUT DATE & TIME, WORCK LOCATION`)
+  → **# OF WORKING HRS = (OUT − IN) − LUNCH & TEA(1)**, # OF OT HRS = WORKING − SCHEDULED,
+  SCHEDULED HRS, UTILIZED HOURS (ඒ දවසේ transactions වලින්), UTILIZATION, USER NAME/DEPT compute.
+  පැය 20+ හෝ නිවාඩු/ඉරිදා rows → **PENDING** (admin approval).
 
 | Page | User | Admin |
 |------|:----:|:-----:|

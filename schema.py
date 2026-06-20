@@ -164,6 +164,7 @@ FULL_OT_RECOVERY_BONUS = 3000    # 100% OT recovery bonus
 TXN_INCENTIVE_DIVISOR = 10       # Transaction incentive = revenue / 10
 DEFAULT_TARGET = 20000           # Sheet2 එකේ Target = 20000
 COMPLAINT_PENALTY = 1000         # complaint එකකට incentive එකෙන් අඩු කරන මුදල
+LUNCH_TEA_HOURS = 1.0            # # OF WORKING HRS වලින් අඩු කරන lunch & tea පැය
 
 # ───────────────── AUDIT / SCHEDULE rules ─────────────────
 WORKING_HRS_CAP = 20             # දවසකට පැය 20 ට වඩා -> Admin approval ඕනේ
