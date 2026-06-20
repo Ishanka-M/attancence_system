@@ -12,8 +12,13 @@ from __future__ import annotations
 import datetime as dt
 
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
+
+try:
+    import plotly.graph_objects as go
+    HAS_PLOTLY = True
+except ImportError:
+    HAS_PLOTLY = False   # plotly නැත්නම් gauges වෙනුවට bar chart fall back
 
 import calc
 import gsheets
@@ -357,19 +362,21 @@ elif page == "🏠 Dashboard":
     sv = calc.site_volume_month(full_txn, this_month)
     if sv.empty:
         st.info("මේ මාසෙට transactions නෑ.")
-    else:
+    elif HAS_PLOTLY:
         mx = float(sv["VOLUME"].max())
         cols = st.columns(min(len(sv), 4))
         for i, (_, r) in enumerate(sv.iterrows()):
             with cols[i % len(cols)]:
                 st.plotly_chart(gauge(r["VOLUME"], mx, r["SITE"], "#4da3ff"),
                                 use_container_width=True, key=f"sv_{i}")
+    else:
+        st.bar_chart(sv.set_index("SITE")["VOLUME"], color="#4da3ff")
 
     st.subheader(f"🏆 වැඩිම Transaction කරපු Top 5 ({this_month})")
     top5 = calc.top_users_volume(full_txn, this_month, 5)
     if top5.empty:
         st.info("මේ මාසෙට data නෑ.")
-    else:
+    elif HAS_PLOTLY:
         mx = float(top5["VOLUME"].max())
         medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
         gcolors = ["#ffd700", "#c0c0c0", "#cd7f32", "#4da3ff", "#7c5cff"]
@@ -379,6 +386,8 @@ elif page == "🏠 Dashboard":
                 st.plotly_chart(
                     gauge(r["VOLUME"], mx, f"{medals[i]} {r['USER']}", gcolors[i]),
                     use_container_width=True, key=f"top_{i}")
+    else:
+        st.bar_chart(top5.set_index("USER")["VOLUME"], color="#ffb454")
 
 
 # ═══════════════════════════ TRANSACTION ═══════════════════════════
@@ -1077,19 +1086,43 @@ elif page == "🗂️ Data Manager":
 
     mkey = st.selectbox("Sheet", editable)
     df = gsheets.get_df(mkey)
-    st.caption(f"{len(df)} records • cell double-click → **update** · "
-               "පහළ හිස් row එකෙන් → **add** · row එක select කරලා delete key → **delete** · "
-               "අන්තිමට Save click කරන්න.")
-    edited = st.data_editor(df, use_container_width=True, num_rows="dynamic",
-                            hide_index=True, key=f"ed_{mkey}")
 
+    # optional search filter (loud datasets වල පහසුවට)
+    q = st.text_input("🔎 Search (optional)", "")
+    view = df
+    if q.strip():
+        mask = df.apply(lambda r: r.astype(str).str.contains(q, case=False, na=False).any(), axis=1)
+        view = df[mask]
+
+    st.caption(f"{len(df)} records • **cell double-click → edit** · "
+               "**පහළ ➕ row → add** · **🗑️ Delete? tick කරලා → delete** · "
+               "අන්තිමට 💾 Save.")
+
+    # 🗑️ Delete? column එකක් මුලට දානවා — delete එක පැහැදිලියි
+    work = view.copy()
+    work.insert(0, "🗑️ Delete?", False)
+    edited = st.data_editor(
+        work, use_container_width=True, num_rows="dynamic",
+        hide_index=True, key=f"ed_{mkey}_{q}",
+        column_config={"🗑️ Delete?": st.column_config.CheckboxColumn(
+            "🗑️ Delete?", help="මේ row එක delete කරන්න tick කරන්න", default=False)},
+    )
+
+    ndel = int(edited["🗑️ Delete?"].fillna(False).sum())
     c1, c2 = st.columns([1, 4])
-    if c1.button("💾 Save", type="primary"):
-        gsheets.overwrite(mkey, edited)
-        st.success(f"{mkey} update කළා ✅ ({len(edited)} rows)")
+    if c1.button(f"💾 Save ({ndel} delete)" if ndel else "💾 Save", type="primary"):
+        kept = edited[~edited["🗑️ Delete?"].fillna(False)].drop(columns=["🗑️ Delete?"])
+        if q.strip():
+            # search filter එකක් තිබ්බොත් — පෙන්නපු rows විතරක් replace, ඉතුරු තියාගන්නවා
+            hidden = df[~df.index.isin(view.index)]
+            final = pd.concat([hidden, kept], ignore_index=True)
+        else:
+            final = kept.reset_index(drop=True)
+        gsheets.overwrite(mkey, final)
+        st.success(f"{mkey} update කළා ✅ — {len(final)} rows ({ndel} deleted)")
         st.cache_data.clear()
-    c2.caption("⚠️ Save කළාම මුළු sheet එකම මේ table එකෙන් replace වෙනවා "
-               "(add + update + delete එකවර apply වෙනවා).")
+        st.rerun()
+    c2.caption("⚠️ Save කළාම add + edit + delete (ticked rows) එකවර apply වෙනවා.")
 
     if mkey == "TCODE-M":
         st.info("ℹ️ TCODE-M = මුල් Excel එකේ *Master sheet - Finalized* (SMV/rate engine). "
