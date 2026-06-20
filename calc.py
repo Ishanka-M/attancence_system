@@ -429,3 +429,91 @@ def filter_by_range(df: pd.DataFrame, date_col: str, start, end,
     if user_id and user_id != "ALL" and "USER ID" in out:
         out = out[out["USER ID"].astype(str).str.strip() == user_id]
     return out
+
+
+# ═══════════════════ UPLOAD validation (rules apply on bulk add) ═══════════════════
+def validate_attendance_upload(df: pd.DataFrame, existing_att: pd.DataFrame,
+                               holidays: set):
+    """
+    Excel/CSV එකෙන් එන ATTANDANCE rows වලට rules apply කරනවා:
+      • # OF WORKING HRS > 20  -> APPROVAL STATUS = PENDING
+      • නිවාඩු/ඉරිදා දවසට       -> APPROVAL STATUS = PENDING
+      • සතියට OT > 15           -> Weekly-OT warning (existing + new combined)
+    SCHEDULED HRS, UTILIZATION recompute කරනවා, UNIC CODE නැත්නම් හදනවා.
+    return: (save_df, display_df)  — display_df එකේ '⚠ VIOLATION' column එකක් තියෙනවා.
+    """
+    H = schema.SHEETS["ATTANDANCE"]["headers"]
+    out = pd.DataFrame({h: (df[h] if h in df.columns else "") for h in H})
+
+    scheds, statuses, notes = [], [], []
+    for _, r in out.iterrows():
+        wh = _f(r["# OF WORKING HRS"])
+        d = r["DATE"]
+        sched = scheduled_hours(d, holidays)
+        needs, reason = attendance_needs_approval(wh, d, holidays)
+        scheds.append(round(sched, 2))
+        statuses.append(schema.APPR_PENDING if needs else schema.APPR_OK)
+        notes.append(reason)
+    out["SCHEDULED HRS"] = scheds
+    out["APPROVAL STATUS"] = statuses
+    out["APPROVAL NOTE"] = notes
+    out["UTILIZATION"] = [
+        calc_attendance_utilization(r["UTILIZED HOURS"], r["# OF WORKING HRS"])
+        for _, r in out.iterrows()
+    ]
+    # UNIC CODE
+    for i in out.index:
+        if not str(out.at[i, "UNIC CODE"]).strip():
+            d = _to_date(out.at[i, "DATE"])
+            uid = str(out.at[i, "USER ID"]).strip()
+            if d and uid:
+                out.at[i, "UNIC CODE"] = d.strftime("%Y%m%d") + uid
+
+    # weekly OT (existing + new combined)
+    if existing_att is not None and not existing_att.empty:
+        combined = pd.concat([existing_att, out], ignore_index=True)
+    else:
+        combined = out
+    wk = audit_weekly_ot(combined)
+    over = set(zip(wk["USER ID"].astype(str), wk["WEEK"])) if not wk.empty else set()
+
+    display = out.copy()
+    viol = []
+    for _, r in out.iterrows():
+        d = _to_date(r["DATE"])
+        wkey = (str(r["USER ID"]).strip(), _week_key(d)) if d else None
+        parts = []
+        if r["APPROVAL NOTE"]:
+            parts.append(r["APPROVAL NOTE"])
+        if wkey in over:
+            parts.append("Weekly OT > 15")
+        viol.append(" / ".join(parts))
+    display["⚠ VIOLATION"] = viol
+    return out, display
+
+
+def validate_transaction_upload(df: pd.DataFrame, tcode_lut: dict):
+    """
+    TRANSACTION rows වලට data-quality check:
+      • T-CODE එක TCODE-M එකේ තියෙනවද
+      • TIME එක NORMAL / OT -N / OT -D ද
+      • # OF TRANSACTION > 0 ද
+    return: (df_aligned, display_df, error_mask)  — error_mask True = block.
+    """
+    H = schema.SHEETS["TRANSACTION"]["headers"]
+    out = pd.DataFrame({h: (df[h] if h in df.columns else "") for h in H})
+    valid_times = {"NORMAL", "OT-N", "OT-D"}
+    errs, mask = [], []
+    for _, r in out.iterrows():
+        e = []
+        if str(r["T-CODE"]).strip() not in tcode_lut:
+            e.append("T-CODE invalid")
+        if str(r["TIME"]).upper().replace(" ", "") not in valid_times:
+            e.append("TIME invalid")
+        if _f(r["# OF TRANSACTION"]) <= 0:
+            e.append("qty ≤ 0")
+        errs.append(" / ".join(e))
+        mask.append(len(e) > 0)
+    display = out.copy()
+    display["⚠ ERROR"] = errs
+    return out, display, pd.Series(mask, index=out.index)

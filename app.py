@@ -649,24 +649,17 @@ elif page == "📥 Export":
 # ═══════════════════════════ UPLOAD ═══════════════════════════
 elif page == "📤 Upload":
     st.header("📤 Bulk Upload — ATTANDANCE / TRANSACTION")
-    st.caption("Excel (.xlsx) හෝ CSV එකකින් data එකපාර add කරන්න. Column නම් "
-               "sheet එකේ headers එක්ක match විය යුතුයි (template download කරගන්න).")
+    st.caption("Excel (.xlsx) හෝ CSV එකකින් data add කරන්න. **Rules check කරලා "
+               "තමයි add කරන්නේ** — violations block / approval වෙයි.")
 
     target = st.selectbox("Sheet", ["TRANSACTION", "ATTANDANCE"])
     headers = schema.SHEETS[target]["headers"]
+    holidays = _holidays_set()
 
-    # template download (headers only)
     tmpl = pd.DataFrame(columns=headers)
-    st.download_button("⬇️ Template (.csv) download",
+    st.download_button("⬇️ Template (.csv)",
                        tmpl.to_csv(index=False).encode("utf-8-sig"),
                        file_name=f"{target}_template.csv", mime="text/csv")
-
-    recompute = False
-    if target == "TRANSACTION":
-        recompute = st.checkbox(
-            "Calculated fields recompute කරන්න (SMV / UTILIZE HOURS / REVANUE / In)",
-            value=True,
-            help="T-CODE + TIME + # OF TRANSACTION එකෙන් නැවත ගණනය කරනවා.")
 
     up = st.file_uploader("File එක", type=["xlsx", "xls", "csv"])
     if up is not None:
@@ -677,40 +670,85 @@ elif page == "📤 Upload":
             st.error(f"File කියවන්න බෑ: {e}")
             st.stop()
         raw = raw.fillna("")
-        st.write(f"කියෙව්වා: {len(raw)} rows, columns: {list(raw.columns)}")
+        st.write(f"කියෙව්වා: {len(raw)} rows")
 
-        # headers වලට align — නැති columns හිස්ව, extra columns drop
-        aligned = pd.DataFrame({h: raw[h] if h in raw.columns else "" for h in headers})
-
-        if target == "TRANSACTION" and recompute:
+        # ─────────────── TRANSACTION ───────────────
+        if target == "TRANSACTION":
             lut = calc.build_tcode_lookup(_tcodes())
-            rows = []
-            for _, r in aligned.iterrows():
-                code = str(r["T-CODE"]).strip()
+            aligned = pd.DataFrame({h: (raw[h] if h in raw.columns else "") for h in headers})
+            # calculated fields recompute
+            for i in aligned.index:
+                code = str(aligned.at[i, "T-CODE"]).strip()
                 info = lut.get(code, {})
-                res = calc.calc_transaction(info, r["TIME"], r["# OF TRANSACTION"])
-                r["CSSTR00"] = r["CSSTR00"] or info.get("desc", "")
-                r["UOM"] = r["UOM"] or info.get("uom", "")
-                r["SMV"] = res["smv"]
-                r["UTILIZE HOURS"] = res["utilize_hours"]
-                r["REVANUE-NORMAL"] = res["rev_normal"]
-                r["REVANUE-OT -N"] = res["rev_otn"]
-                r["REVANUE-OT -D"] = res["rev_otd"]
-                r["In"] = res["txn_incentive"]
-                # UNIC CODE නැත්නම් හදනවා
-                if not str(r["UNIC CODE"]).strip() and str(r["Date"]).strip() and str(r["USER ID"]).strip():
-                    r["UNIC CODE"] = unic(calc._to_date(r["Date"]) or r["Date"], str(r["USER ID"]).strip())
-                rows.append(r)
-            aligned = pd.DataFrame(rows, columns=headers)
+                res = calc.calc_transaction(info, aligned.at[i, "TIME"], aligned.at[i, "# OF TRANSACTION"])
+                aligned.at[i, "CSSTR00"] = aligned.at[i, "CSSTR00"] or info.get("desc", "")
+                aligned.at[i, "UOM"] = aligned.at[i, "UOM"] or info.get("uom", "")
+                aligned.at[i, "SMV"] = res["smv"]
+                aligned.at[i, "UTILIZE HOURS"] = res["utilize_hours"]
+                aligned.at[i, "REVANUE-NORMAL"] = res["rev_normal"]
+                aligned.at[i, "REVANUE-OT -N"] = res["rev_otn"]
+                aligned.at[i, "REVANUE-OT -D"] = res["rev_otd"]
+                aligned.at[i, "In"] = res["txn_incentive"]
+                if not str(aligned.at[i, "UNIC CODE"]).strip():
+                    d = calc._to_date(aligned.at[i, "Date"]); uid = str(aligned.at[i, "USER ID"]).strip()
+                    if d and uid:
+                        aligned.at[i, "UNIC CODE"] = d.strftime("%Y%m%d") + uid
 
-        st.subheader("Preview")
-        st.dataframe(aligned.head(50), use_container_width=True, hide_index=True)
+            save_df, disp, errmask = calc.validate_transaction_upload(aligned, lut)
+            n_err = int(errmask.sum())
+            n_ok = len(save_df) - n_err
+            c1, c2 = st.columns(2)
+            c1.metric("✅ OK rows", n_ok)
+            c2.metric("🚫 Error rows (block)", n_err)
 
-        if st.button(f"⬆️ {target} එකට {len(aligned)} rows append කරන්න", type="primary"):
-            body = aligned.fillna("").astype(str).values.tolist()
-            gsheets.append_rows(target, body)
-            st.success(f"{len(body)} rows {target} එකට add කළා ✅")
-            st.cache_data.clear()
+            if n_err:
+                st.error("පහත rows වල rule/validation errors — මේවා add වෙන්නේ නෑ:")
+                st.dataframe(style_flag(disp[errmask]), use_container_width=True, hide_index=True)
+
+            clean = save_df[~errmask]
+            st.subheader(f"Add වෙන {len(clean)} rows (preview)")
+            st.dataframe(clean.head(50), use_container_width=True, hide_index=True)
+
+            if len(clean) and st.button(f"⬆️ {len(clean)} clean rows add කරන්න", type="primary"):
+                gsheets.append_rows(target, clean.fillna("").astype(str).values.tolist())
+                st.success(f"{len(clean)} rows add කළා ✅ ({n_err} error rows skip කළා)")
+                st.cache_data.clear()
+
+        # ─────────────── ATTANDANCE ───────────────
+        else:
+            existing = gsheets.get_df("ATTANDANCE")
+            save_df, disp = calc.validate_attendance_upload(raw, existing, holidays)
+            viol_mask = disp["⚠ VIOLATION"].astype(str).str.len() > 0
+            pending_mask = save_df["APPROVAL STATUS"] == schema.APPR_PENDING
+            n_pending = int(pending_mask.sum())
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total", len(save_df))
+            c2.metric("✅ OK", int((~pending_mask).sum()))
+            c3.metric("⏳ Approval ඕනේ", n_pending)
+
+            if viol_mask.any():
+                st.warning("⚠️ Rule violations — මේවා **PENDING** විදිහට add වෙයි "
+                           "(Admin → Approvals වලින් approve කරන්න ඕනේ):")
+                st.dataframe(
+                    style_flag(disp[viol_mask][[
+                        "DATE", "USER ID", "# OF WORKING HRS", "SCHEDULED HRS",
+                        "# OF OT HRS", "APPROVAL STATUS", "⚠ VIOLATION"]]),
+                    use_container_width=True, hide_index=True)
+
+            mode = st.radio("Add mode", [
+                "Clean rows විතරක් (violations skip)",
+                "ඔක්කොම add — violations PENDING විදිහට",
+            ], index=1)
+
+            to_add = save_df if mode.startswith("ඔක්කොම") else save_df[~pending_mask]
+            st.subheader(f"Add වෙන {len(to_add)} rows (preview)")
+            st.dataframe(to_add.head(50), use_container_width=True, hide_index=True)
+
+            if len(to_add) and st.button(f"⬆️ {len(to_add)} rows add කරන්න", type="primary"):
+                gsheets.append_rows("ATTANDANCE", to_add.fillna("").astype(str).values.tolist())
+                st.success(f"{len(to_add)} rows add කළා ✅"
+                           + (f" ({n_pending} PENDING — approve කරන්න)" if mode.startswith("ඔක්කොම") and n_pending else ""))
+                st.cache_data.clear()
 
 
 # ═══════════════════════════ ADMIN ═══════════════════════════

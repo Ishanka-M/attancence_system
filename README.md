@@ -25,8 +25,11 @@ GitHub එකට push කරලා **Streamlit Cloud** එකේ free deploy ක
 
 ### 📤 Bulk Upload (admin)
 ATTANDANCE / TRANSACTION — Excel (.xlsx) හෝ CSV එකකින් data එකපාර add කරන්න.
-Template එකක් download කරගන්න පුළුවන්. TRANSACTION upload කරද්දී
-**calculated fields (SMV/UTILIZE/REVANUE/In) auto-recompute** වෙනවා (checkbox).
+Template එකක් download කරගන්න පුළුවන්. **Upload කරද්දීත් audit rules check වෙනවා:**
+- **TRANSACTION:** T-CODE/TIME/qty valid ද check කරලා, error rows **block** කරනවා.
+  SMV/UTILIZE/REVANUE/In auto-recompute වෙනවා.
+- **ATTANDANCE:** පැය 20+ හෝ නිවාඩු/ඉරිදා rows → **PENDING** (admin approve කරන තෙක්),
+  සතියට OT 15+ → highlight. "Clean විතරක්" හෝ "ඔක්කොම (violations PENDING)" කියලා තෝරන්න පුළුවන්.
 
 ### 🗂️ Data Manager (admin) — Add / Update / Delete
 `USER-M`, `CUSTOMMER-M`, `TCODE-M` (= Master sheet - Finalized),
