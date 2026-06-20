@@ -611,3 +611,150 @@ def validate_transaction_upload(df: pd.DataFrame, tcode_lut: dict):
     display = out.copy()
     display["⚠ ERROR"] = errs
     return out, display, pd.Series(mask, index=out.index)
+
+
+# ═══════════════════════ COST & REVENUE report (payroll) ═══════════════════════
+def _ot_split_and_days(att_df: pd.DataFrame, holidays: set, month: str):
+    """
+    Attendance වලින් per-user (selected month): worked_days, OT-N hrs, OT-D hrs.
+      • normal දවස් වල OT (working − scheduled)  -> OT-N
+      • rest day (ඉරිදා/නිවාඩු) වැඩ              -> OT-D
+    """
+    acc = {}
+    if att_df is None or att_df.empty or schema.A_DATE not in att_df:
+        return acc
+    for _, a in att_df.iterrows():
+        d = _to_date(a.get(schema.A_DATE))
+        if d is None or _month_key(d) != month:
+            continue
+        uid = str(a.get(schema.A_USER, "")).strip()
+        if not uid:
+            continue
+        wh = _f(a.get(schema.A_WH))
+        sched = scheduled_hours(d, holidays)
+        s = acc.setdefault(uid, {"days": 0, "otn": 0.0, "otd": 0.0})
+        if wh > 0:
+            s["days"] += 1
+        if sched <= 0:
+            s["otd"] += wh
+        else:
+            s["otn"] += max(wh - sched, 0.0)
+    return acc
+
+
+def cost_revenue_report(att_df, txn_df, salary_df, user_df, holidays, month):
+    """
+    Admin Cost & Revenue report (user-wise, monthly) — Book1 format එක.
+      Cost  = Basic + OT-N Amt + OT-D Amt + Fixed Incentive + EPF + ETF + Contractor Fee
+      Revenue = Σ REVANUE-NORMAL/OT-N/OT-D (transactions)
+      Margin  = Revenue − Cost
+    """
+    ot = _ot_split_and_days(att_df, holidays, month)
+
+    # revenue per user (month)
+    rev = {}
+    if txn_df is not None and not txn_df.empty and schema.T_DATE in txn_df:
+        for _, t in txn_df.iterrows():
+            d = _to_date(t.get(schema.T_DATE))
+            if d is None or _month_key(d) != month:
+                continue
+            uid = str(t.get(schema.T_USER, "")).strip()
+            if not uid:
+                continue
+            r = rev.setdefault(uid, {"n": 0.0, "otn": 0.0, "otd": 0.0})
+            r["n"] += _f(t.get(schema.T_REV_N))
+            r["otn"] += _f(t.get(schema.T_REV_OTN))
+            r["otd"] += _f(t.get(schema.T_REV_OTD))
+
+    # salary lookup
+    sal = {}
+    if salary_df is not None and not salary_df.empty and "USER ID" in salary_df:
+        for _, s in salary_df.iterrows():
+            sal[str(s.get("USER ID", "")).strip()] = s
+
+    # name lookup
+    name = {}
+    if user_df is not None and not user_df.empty and "USER ID" in user_df:
+        name = {str(r["USER ID"]).strip(): r.get("USER NAME", "") for _, r in user_df.iterrows()}
+
+    uids = set(ot) | set(rev) | set(sal)
+    rows = []
+    for uid in sorted(uids):
+        o = ot.get(uid, {"days": 0, "otn": 0.0, "otd": 0.0})
+        rv = rev.get(uid, {"n": 0.0, "otn": 0.0, "otd": 0.0})
+        s = sal.get(uid, {})
+        basic = _f(s.get("BASIC SALARY")) if len(s) else 0.0
+        hourly = basic / schema.OT_HOURLY_DIVISOR if basic else 0.0
+        otn_rate = _f(s.get("OT-N RATE")) or round(hourly * schema.OT_N_MULTIPLIER, 4)
+        otd_rate = _f(s.get("OT-D RATE")) or round(hourly * schema.OT_D_MULTIPLIER, 4)
+        fixed_inc = _f(s.get("FIXED INCENTIVE")) if len(s) else 0.0
+        epf_pct = _f(s.get("EPF %"), schema.EPF_PCT) or schema.EPF_PCT
+        etf_pct = _f(s.get("ETF %"), schema.ETF_PCT) or schema.ETF_PCT
+        contractor = _f(s.get("CONTRACTOR FEE")) if len(s) else 0.0
+
+        otn_amt = round(o["otn"] * otn_rate, 2)
+        otd_amt = round(o["otd"] * otd_rate, 2)
+        gross = round(basic + otn_amt + otd_amt + fixed_inc, 2)
+        epf = round(basic * epf_pct / 100, 2)
+        etf = round(basic * etf_pct / 100, 2)
+        cost = round(gross + epf + etf + contractor, 2)
+        total_rev = round(rv["n"] + rv["otn"] + rv["otd"], 2)
+        rows.append({
+            "USER ID": uid,
+            "CSS USER NAME": (s.get("CSS USER NAME") if len(s) and str(s.get("CSS USER NAME", "")).strip() else name.get(uid, "")),
+            "JOB TITLE": s.get("JOB TITLE", "") if len(s) else "",
+            "WORKED DAYS": o["days"],
+            "OT-N HRS": round(o["otn"], 2), "OT-D HRS": round(o["otd"], 2),
+            "BASIC SALARY": round(basic, 2),
+            "OT-N AMOUNT": otn_amt, "OT-D AMOUNT": otd_amt,
+            "FIXED INCENTIVE": round(fixed_inc, 2),
+            "TOTAL GROSS": gross, "EPF": epf, "ETF": etf,
+            "CONTRACTOR FEE": round(contractor, 2),
+            "COST TO COMPANY": cost,
+            "REVENUE NORMAL": round(rv["n"], 2),
+            "REVENUE OT-N": round(rv["otn"], 2),
+            "REVENUE OT-D": round(rv["otd"], 2),
+            "TOTAL REVENUE": total_rev,
+            "MARGIN": round(total_rev - cost, 2),
+        })
+    cols = ["USER ID", "CSS USER NAME", "JOB TITLE", "WORKED DAYS", "OT-N HRS",
+            "OT-D HRS", "BASIC SALARY", "OT-N AMOUNT", "OT-D AMOUNT",
+            "FIXED INCENTIVE", "TOTAL GROSS", "EPF", "ETF", "CONTRACTOR FEE",
+            "COST TO COMPANY", "REVENUE NORMAL", "REVENUE OT-N", "REVENUE OT-D",
+            "TOTAL REVENUE", "MARGIN"]
+    return pd.DataFrame(rows, columns=cols)
+
+
+def site_volume_month(txn_df: pd.DataFrame, month: str) -> pd.DataFrame:
+    """SITE අනුව current-month transaction volume (# OF TRANSACTION එකතුව)."""
+    if txn_df is None or txn_df.empty or schema.T_DATE not in txn_df:
+        return pd.DataFrame()
+    rows = {}
+    for _, t in txn_df.iterrows():
+        d = _to_date(t.get(schema.T_DATE))
+        if d is None or _month_key(d) != month:
+            continue
+        site = str(t.get("SITE", "")).strip() or "—"
+        rows[site] = rows.get(site, 0.0) + _f(t.get(schema.T_QTY))
+    return pd.DataFrame(sorted(rows.items(), key=lambda x: -x[1]),
+                        columns=["SITE", "VOLUME"])
+
+
+def top_users_volume(txn_df: pd.DataFrame, month: str, n: int = 5) -> pd.DataFrame:
+    """Current-month වැඩිම transaction කරපු top-N users."""
+    if txn_df is None or txn_df.empty or schema.T_DATE not in txn_df:
+        return pd.DataFrame()
+    rows = {}
+    for _, t in txn_df.iterrows():
+        d = _to_date(t.get(schema.T_DATE))
+        if d is None or _month_key(d) != month:
+            continue
+        key = (str(t.get(schema.T_USER, "")).strip(), str(t.get(schema.T_NAME, "")).strip())
+        if not key[0]:
+            continue
+        rows[key] = rows.get(key, 0.0) + _f(t.get(schema.T_QTY))
+    data = [{"USER": (nm or uid), "VOLUME": v} for (uid, nm), v in rows.items()]
+    df = pd.DataFrame(data)
+    if df.empty:
+        return df
+    return df.sort_values("VOLUME", ascending=False).head(n).reset_index(drop=True)

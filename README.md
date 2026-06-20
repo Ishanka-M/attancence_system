@@ -56,11 +56,21 @@ Template එකක් download කරගන්න පුළුවන්. **Uploa
 | 📋 **Complaint** | Customer complaint log |
 | ✅ **KPI Update** | On-time KPI update tracking |
 | 💰 **Incentive** | User එක එකකට incentive එකතුව + complaint penalty + INSENTIVE sheet save |
-| 🔍 **Audit** | Rule violations 5ක් highlight කරලා පෙන්නනවා (පහත බලන්න) |
-| 📥 **Export** | ATTANDANCE / TRANSACTION — **date range + user level** filter කරලා Excel/CSV download |
-| 🛡️ **Admin** | Attendance approvals + නිවාඩු දවස් (HOLIDAY-M) setup *(PIN protected)* |
-| 👥 **Masters** | USER-M, TCODE-M, SITE-M ... live edit |
-| 🏠 **Dashboard** | **Monthly user-level** OT / Revenue / Cost / Incentive + charts |
+| 💵 **Cost/Revenue** | **User-wise payroll cost vs revenue** report (monthly) + Excel download *(admin)* |
+| 🔍 **Audit** | Rule violations 5ක් highlight කරලා පෙන්නනවා |
+| 📥 **Export** · 📤 **Upload** · 🛡️ **Admin** · 🗂️ **Data Manager** | admin |
+| 🏠 **Dashboard** | Monthly OT/Revenue/Cost/Incentive + **SITE volume** + **Top-5 performers** graphs |
+
+### 💵 Cost & Revenue (admin)
+Book1 format එකට — user එක එකකට මාසික **Cost to Company vs Revenue + Margin**:
+`Cost = Basic + OT-N/OT-D Amount + Fixed Incentive + EPF(12%) + ETF(3%) + Contractor Fee`,
+`Revenue = transactions`, `Margin = Revenue − Cost`. Margin අඩු (loss) users රතුවෙන් highlight.
+Salary data **🗂️ Data Manager → SALARY-M** එකෙන් දාන්න — **BASIC SALARY විතරක් ඇති**,
+OT-N rate (Basic÷240×1.5) සහ OT-D rate (Basic÷240×2) auto-derive වෙනවා.
+
+### 🏠 Dashboard graphs (හැම user කෙනෙක්ටම)
+- **SITE level transaction volume** (current month) — bar chart
+- **Top 5 transaction performers** (current month) — leaderboard + bar chart
 
 > මුල් Excel එකේ data ඔක්කොම (336 T-codes, 110 users, 128 customers, sites,
 > locations, times) seed data විදිහට මේකට දාලා තියෙනවා — Setup එක run කළාම

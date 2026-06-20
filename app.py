@@ -20,6 +20,51 @@ import schema
 
 st.set_page_config(page_title="EFL KPI System", page_icon="📊", layout="wide")
 
+# ───────────────────────── UI polish (dark theme) ─────────────────────────
+st.markdown("""
+<style>
+:root { --accent:#4da3ff; --accent2:#7c5cff; --card:#161b26; --line:#262e3f; }
+.block-container { padding-top: 2.2rem; max-width: 1300px; }
+h1, h2, h3 { letter-spacing:.2px; }
+h1 { background: linear-gradient(90deg,#4da3ff,#7c5cff);
+     -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+     font-weight:800; }
+/* metric cards */
+div[data-testid="stMetric"] {
+    background: linear-gradient(160deg,#1a2030,#12161f);
+    border:1px solid var(--line); border-radius:16px;
+    padding:16px 18px; box-shadow:0 4px 18px rgba(0,0,0,.35);
+}
+div[data-testid="stMetric"]:hover { border-color:var(--accent); transition:.2s; }
+div[data-testid="stMetricValue"] { font-weight:700; }
+/* buttons */
+.stButton>button, .stDownloadButton>button {
+    border-radius:10px; border:1px solid var(--line); font-weight:600;
+    transition:.15s;
+}
+.stButton>button[kind="primary"] {
+    background:linear-gradient(90deg,var(--accent),var(--accent2));
+    border:none;
+}
+.stButton>button:hover { transform:translateY(-1px); border-color:var(--accent); }
+/* tabs */
+button[data-baseweb="tab"] { font-weight:600; }
+/* sidebar */
+section[data-testid="stSidebar"] {
+    background:linear-gradient(180deg,#12161f,#0e1117);
+    border-right:1px solid var(--line);
+}
+section[data-testid="stSidebar"] .stRadio label { padding:3px 0; }
+/* dataframes */
+div[data-testid="stDataFrame"] { border-radius:12px; overflow:hidden;
+    border:1px solid var(--line); }
+/* inputs */
+div[data-baseweb="select"]>div, .stTextInput input, .stNumberInput input,
+.stDateInput input { border-radius:9px !important; }
+hr { border-color:var(--line); }
+</style>
+""", unsafe_allow_html=True)
+
 TIME_OPTIONS = [schema.TIME_NORMAL, schema.TIME_OT_N, schema.TIME_OT_D]
 
 
@@ -155,7 +200,11 @@ CURRENT_UNAME = ss.uname
 ALLOWED_UIDS = None  # None = සියල්ල (admin)
 IS_LEADER = False
 if not IS_ADMIN:
-    ALLOWED_UIDS = calc.team_user_ids(_users(), CURRENT_UID)
+    try:
+        ALLOWED_UIDS = calc.team_user_ids(_users(), CURRENT_UID)
+    except AttributeError:
+        # calc.py පරණ version එකක් නම් — normal user විදිහට degrade
+        ALLOWED_UIDS = {CURRENT_UID}
     IS_LEADER = len(ALLOWED_UIDS) > 1
 
 # ── sidebar: who + logout ──
@@ -171,7 +220,8 @@ if IS_ADMIN:
     PAGES = [
         "🏠 Dashboard", "⚙️ Setup", "📝 Transaction", "🕐 Attendance",
         "⏱️ OT Approval", "📋 Complaint", "✅ KPI Update", "💰 Incentive",
-        "🔍 Audit", "📥 Export", "📤 Upload", "🛡️ Admin", "🗂️ Data Manager",
+        "💵 Cost/Revenue", "🔍 Audit", "📥 Export", "📤 Upload", "🛡️ Admin",
+        "🗂️ Data Manager",
     ]
 else:
     PAGES = ["🏠 Dashboard", "📝 Transaction", "🕐 Attendance", "💰 Incentive", "📤 Upload"]
@@ -269,6 +319,31 @@ elif page == "🏠 Dashboard":
         st.subheader("📈 මාසික Revenue trend")
         trend = summ_all.groupby("MONTH")["TOTAL REV"].sum()
         st.line_chart(trend)
+
+    # ── Company-wide graphs (current month) — හැම user කෙනෙක්ටම ──
+    st.divider()
+    this_month = dt.date.today().strftime("%Y-%m")
+    full_txn = gsheets.get_df("TRANSACTION")   # unscoped: company-wide
+    st.subheader(f"🏢 SITE level — Transaction Volume ({this_month})")
+    sv = calc.site_volume_month(full_txn, this_month)
+    if sv.empty:
+        st.info("මේ මාසෙට transactions නෑ.")
+    else:
+        st.bar_chart(sv.set_index("SITE")["VOLUME"], color="#4da3ff")
+
+    st.subheader(f"🏆 වැඩිම Transaction කරපු Top 5 ({this_month})")
+    top5 = calc.top_users_volume(full_txn, this_month, 5)
+    if top5.empty:
+        st.info("මේ මාසෙට data නෑ.")
+    else:
+        c_l, c_r = st.columns([3, 2])
+        with c_l:
+            st.bar_chart(top5.set_index("USER")["VOLUME"], color="#ffb454")
+        with c_r:
+            medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+            for i, row in top5.iterrows():
+                st.markdown(f"### {medals[i] if i < 5 else ''} {row['USER']}")
+                st.caption(f"{row['VOLUME']:,.0f} transactions")
 
 
 # ═══════════════════════════ TRANSACTION ═══════════════════════════
@@ -543,6 +618,63 @@ elif page == "💰 Incentive":
                 gsheets.overwrite("INSENTIVE", inc)
                 st.success("INSENTIVE sheet update කළා ✅")
                 st.cache_data.clear()
+
+
+# ═══════════════════════════ COST / REVENUE ═══════════════════════════
+elif page == "💵 Cost/Revenue":
+    st.header("💵 Cost & Revenue — User-wise")
+    if not IS_ADMIN:
+        st.warning("Admin ලට පමණයි.")
+        st.stop()
+    st.caption("Cost = Basic + OT(N/D) + Fixed Incentive + EPF(12%) + ETF(3%) + Contractor Fee · "
+               "Revenue = transactions · Margin = Revenue − Cost. "
+               "Salary data 🗂️ Data Manager → SALARY-M එකෙන් දාන්න (BASIC SALARY විතරක් ඇති — OT rates auto).")
+
+    months_default = dt.date.today().strftime("%Y-%m")
+    month = st.text_input("Month (YYYY-MM)", months_default)
+
+    if st.button("🧮 Report generate කරන්න", type="primary"):
+        rep = calc.cost_revenue_report(
+            gsheets.get_df("ATTANDANCE"), gsheets.get_df("TRANSACTION"),
+            gsheets.get_df("SALARY-M"), gsheets.get_df("USER-M"),
+            _holidays_set(), month)
+        st.session_state["cr_rep"] = rep
+        st.session_state["cr_month"] = month
+
+    if "cr_rep" in st.session_state:
+        rep = st.session_state["cr_rep"]
+        if rep.empty:
+            st.info("මේ මාසෙට data නෑ.")
+        else:
+            tot_cost = rep["COST TO COMPANY"].apply(calc._f).sum()
+            tot_rev = rep["TOTAL REVENUE"].apply(calc._f).sum()
+            tot_margin = rep["MARGIN"].apply(calc._f).sum()
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Total Cost", f"{tot_cost:,.0f}")
+            c2.metric("Total Revenue", f"{tot_rev:,.0f}")
+            c3.metric("Total Margin", f"{tot_margin:,.0f}",
+                      delta=f"{(tot_margin/tot_cost*100 if tot_cost else 0):.0f}%")
+            c4.metric("Employees", len(rep))
+
+            # margin <0 highlight (red), >=0 light green
+            def _mcolor(row):
+                m = calc._f(row["MARGIN"])
+                bg = "#3a1d1d" if m < 0 else "#1d3a24"
+                return [f"background-color:{bg};color:#e8eaed"] * len(row)
+            st.dataframe(rep.style.apply(_mcolor, axis=1),
+                         use_container_width=True, hide_index=True)
+
+            import io
+            buf = io.BytesIO()
+            with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+                rep.to_excel(xw, sheet_name="Cost-Revenue", index=False)
+            st.download_button("⬇️ Excel download", buf.getvalue(),
+                               file_name=f"Cost_Revenue_{st.session_state['cr_month']}.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+            st.subheader("📊 Cost vs Revenue (user)")
+            chart = rep.set_index("CSS USER NAME")[["COST TO COMPANY", "TOTAL REVENUE"]]
+            st.bar_chart(chart)
 
 
 # ═══════════════════════════ AUDIT ═══════════════════════════
