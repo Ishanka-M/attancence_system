@@ -77,7 +77,7 @@ st.sidebar.caption("CSS • Streamlit + Google Sheets")
 PAGES = [
     "🏠 Dashboard", "⚙️ Setup", "📝 Transaction", "🕐 Attendance",
     "⏱️ OT Approval", "📋 Complaint", "✅ KPI Update", "💰 Incentive",
-    "🔍 Audit", "🛡️ Admin", "👥 Masters",
+    "🔍 Audit", "📥 Export", "🛡️ Admin", "👥 Masters",
 ]
 page = st.sidebar.radio("Menu", PAGES, label_visibility="collapsed")
 
@@ -154,27 +154,56 @@ elif page == "🏠 Dashboard":
         st.info("මුලින් Setup එකෙන් sheets create කරන්න.")
         st.stop()
 
+    # computed totals (TOTAL REVANUE column එකක් save කරන්නේ නෑ — මෙතන ගණනය)
+    def _rev_total(df):
+        if df.empty:
+            return 0.0
+        s = 0.0
+        for c in (schema.T_REV_N, schema.T_REV_OTN, schema.T_REV_OTD):
+            if c in df:
+                s += df[c].apply(calc._f).sum()
+        return s
+
+    total_rev = _rev_total(txn)
+    total_inc = txn.get(schema.T_INCENTIVE, pd.Series(dtype=float)).apply(calc._f).sum() if not txn.empty else 0
+    total_ot = att.get(schema.A_OT, pd.Series(dtype=float)).apply(calc._f).sum() if not att.empty else 0
+
     c1, c2, c3, c4 = st.columns(4)
-    total_rev = txn["TOTAL REVANUE"].apply(calc._f).sum() if "TOTAL REVANUE" in txn else 0
-    total_inc = txn["TXN INCENTIVE"].apply(calc._f).sum() if "TXN INCENTIVE" in txn else 0
     c1.metric("Transactions", f"{len(txn):,}")
     c2.metric("Total Revenue", f"{total_rev:,.0f}")
-    c3.metric("Txn Incentive", f"{total_inc:,.0f}")
-    c4.metric("Attendance rows", f"{len(att):,}")
+    c3.metric("Total Incentive", f"{total_inc:,.0f}")
+    c4.metric("Total OT Hrs", f"{total_ot:,.1f}")
 
-    if not txn.empty and "USER NAME" in txn:
-        st.subheader("👤 User එක අනුව Revenue")
-        g = txn.copy()
-        g["TOTAL REVANUE"] = g["TOTAL REVANUE"].apply(calc._f) if "TOTAL REVANUE" in g else 0
-        top = g.groupby("USER NAME")["TOTAL REVANUE"].sum().sort_values(ascending=False).head(15)
-        st.bar_chart(top)
-
-        st.subheader("📅 දිනපතා Revenue")
-        if "DATE" in g:
-            daily = g.groupby("DATE")["TOTAL REVANUE"].sum()
-            st.line_chart(daily)
+    st.divider()
+    st.subheader("📅 Monthly — User level (OT / Revenue / Cost / Incentive)")
+    summ_all = calc.monthly_user_summary(txn, att)
+    if summ_all.empty:
+        st.info("තවම data නෑ. 📝 Transaction / 🕐 Attendance වලින් දාන්න.")
     else:
-        st.info("තවම transactions නෑ. 📝 Transaction page එකෙන් දාන්න.")
+        months = sorted(summ_all["MONTH"].unique(), reverse=True)
+        msel = st.selectbox("මාසය", months)
+        summ = summ_all[summ_all["MONTH"] == msel].drop(columns=["MONTH"])
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("OT Hrs", f'{summ["OT HRS"].sum():,.1f}')
+        m2.metric("Revenue", f'{summ["TOTAL REV"].sum():,.0f}')
+        m3.metric("Cost (Incentive)", f'{summ["COST"].sum():,.0f}')
+        m4.metric("Incentive", f'{summ["INCENTIVE"].sum():,.0f}')
+
+        st.dataframe(
+            summ[["USER ID", "USER NAME", "OT HRS", "NORMAL REV", "OT REV",
+                  "TOTAL REV", "INCENTIVE", "COST"]],
+            use_container_width=True, hide_index=True,
+        )
+        st.caption("ℹ️ **Cost** = incentive payout (company එකට යන වියදම) කියලා "
+                   "assume කරලා. වෙනත් cost basis එකක් (උදා: OT wage) තියෙනවා නම් කියන්න.")
+
+        st.subheader("👤 User එක අනුව Revenue")
+        st.bar_chart(summ.set_index("USER NAME")["TOTAL REV"].sort_values(ascending=False).head(15))
+
+        st.subheader("📈 මාසික Revenue trend")
+        trend = summ_all.groupby("MONTH")["TOTAL REV"].sum()
+        st.line_chart(trend)
 
 
 # ═══════════════════════════ TRANSACTION ═══════════════════════════
@@ -213,11 +242,12 @@ elif page == "📝 Transaction":
 
     if submitted and uid:
         r = calc.calc_transaction(lut.get(code, {}), time_t, qty)
+        # මුල් Excel order: ... CSSTR00(desc) ... In(incentive), Column18, OT -N
         row = [
             unic(date_v, uid), date_v.isoformat(), uid, uname, site, cust,
             code, info.get("desc", ""), time_t, info.get("uom", ""), qty,
             r["smv"], r["utilize_hours"], r["rev_normal"], r["rev_otn"],
-            r["rev_otd"], r["total_rev"], r["txn_incentive"],
+            r["rev_otd"], r["txn_incentive"], "", "",
         ]
         gsheets.append_rows("TRANSACTION", [row])
         st.success(f"Added ✅  Revenue {r['total_rev']:,.2f} | Incentive {r['txn_incentive']:,.2f}")
@@ -283,8 +313,8 @@ elif page == "🕐 Attendance":
         row = [
             unic(date_v, uid), date_v.isoformat(), uid, uname, dept, subdept,
             in_t.strftime("%H:%M"), out_t.strftime("%H:%M"), lunch, loc, "",
-            wh, ot, sched, util_hrs, util, date_v.strftime("%a").upper(), remark,
-            status, note,
+            wh, ot, "", "", "", util_hrs, util, date_v.strftime("%a").upper(),
+            remark, "", sched, status, note,
         ]
         gsheets.append_rows("ATTANDANCE", [row])
         if status == schema.APPR_PENDING:
@@ -319,8 +349,12 @@ elif page == "⏱️ OT Approval":
         submitted = st.form_submit_button("➕ Add OT", type="primary")
 
     if submitted and uid:
-        row = [unic(rdate, uid), rdate.isoformat(), pdate.isoformat(), site,
-               client, op, uid, uname, req_h, app_h, person, reason, status]
+        # මුල් Excel 23 columns — capture නොකරන ඒවා හිස්ව තියනවා
+        row = [
+            unic(rdate, uid), rdate.isoformat(), pdate.isoformat(), site,
+            client, op, uid, uname, "", person, req_h, app_h, person, "", "",
+            reason, status, app_h, person, "", "", app_h, "",
+        ]
         gsheets.append_rows("OT APPROVAL", [row])
         st.success("Added ✅")
         st.cache_data.clear()
@@ -485,6 +519,63 @@ elif page == "🔍 Audit":
         else:
             st.error(f"⚠️ {len(d5)} users — {adate.isoformat()} දිනට transaction නෑ.")
             st.dataframe(style_flag(d5, "#e0e0ff"), use_container_width=True, hide_index=True)
+
+
+# ═══════════════════════════ EXPORT ═══════════════════════════
+elif page == "📥 Export":
+    st.header("📥 Export — ATTANDANCE / TRANSACTION")
+    st.caption("Date range + user අනුව filter කරලා Excel/CSV download කරන්න. "
+               "Format එක මුල් Excel එකේ විදිහටමයි.")
+
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        which = st.multiselect("Sheets", ["TRANSACTION", "ATTANDANCE"],
+                               default=["TRANSACTION", "ATTANDANCE"])
+    with c2:
+        d_from = st.date_input("From", dt.date.today().replace(day=1))
+    with c3:
+        d_to = st.date_input("To", dt.date.today())
+
+    # user level filter
+    udf = _users()
+    user_map = {"ALL — සියලුම users": "ALL"}
+    if not udf.empty:
+        for _, r in udf.iterrows():
+            uid = str(r.get("USER ID", "")).strip()
+            if uid:
+                user_map[f'{uid} — {r.get("USER NAME","")}'] = uid
+    usel = st.selectbox("User level", list(user_map.keys()))
+    uid_filter = user_map[usel]
+
+    if st.button("🔎 Filter", type="primary"):
+        import io
+        result = {}
+        for key in which:
+            date_col = schema.T_DATE if key == "TRANSACTION" else schema.A_DATE
+            df = gsheets.get_df(key)
+            result[key] = calc.filter_by_range(df, date_col, d_from, d_to, uid_filter)
+        st.session_state["export"] = result
+
+    if "export" in st.session_state:
+        result = st.session_state["export"]
+        import io
+        for key, df in result.items():
+            st.subheader(f"{key} — {len(df)} rows")
+            st.dataframe(df.head(100), use_container_width=True, hide_index=True)
+            st.download_button(
+                f"⬇️ {key} CSV", df.to_csv(index=False).encode("utf-8-sig"),
+                file_name=f"{key}_{d_from}_{d_to}.csv", mime="text/csv",
+                key=f"csv_{key}")
+
+        # combined Excel (original format, sheet per tab)
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+            for key, df in result.items():
+                df.to_excel(xw, sheet_name=key[:31], index=False)
+        st.download_button(
+            "⬇️ Excel (.xlsx) — ඔක්කොම", buf.getvalue(),
+            file_name=f"KPI_export_{d_from}_{d_to}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 
 # ═══════════════════════════ ADMIN ═══════════════════════════

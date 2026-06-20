@@ -18,13 +18,27 @@ GitHub එකට push කරලා **Streamlit Cloud** එකේ free deploy ක
 | ✅ **KPI Update** | On-time KPI update tracking |
 | 💰 **Incentive** | User එක එකකට incentive එකතුව + complaint penalty + INSENTIVE sheet save |
 | 🔍 **Audit** | Rule violations 5ක් highlight කරලා පෙන්නනවා (පහත බලන්න) |
+| 📥 **Export** | ATTANDANCE / TRANSACTION — **date range + user level** filter කරලා Excel/CSV download |
 | 🛡️ **Admin** | Attendance approvals + නිවාඩු දවස් (HOLIDAY-M) setup *(PIN protected)* |
 | 👥 **Masters** | USER-M, TCODE-M, SITE-M ... live edit |
-| 🏠 **Dashboard** | Revenue / incentive charts |
+| 🏠 **Dashboard** | **Monthly user-level** OT / Revenue / Cost / Incentive + charts |
 
 > මුල් Excel එකේ data ඔක්කොම (336 T-codes, 110 users, 128 customers, sites,
 > locations, times) seed data විදිහට මේකට දාලා තියෙනවා — Setup එක run කළාම
 > Google Sheet එක ම පිරිලා එනවා.
+
+### 🗂️ Google Sheet data format
+ATTANDANCE, TRANSACTION, OT APPROVAL, CUSTOMMER COMPLAINT — **මුල් Excel එකේ
+column නම් + order එකම** තියාගෙන save වෙනවා (TRANSACTION 19 cols, ATTANDANCE
+21 cols). Audit feature වලට ඕනේ system columns 3ක් විතරක් (`SCHEDULED HRS`,
+`APPROVAL STATUS`, `APPROVAL NOTE`) ATTANDANCE එකේ **අගට** add වෙනවා — මුල්
+format එක එලෙසම තියෙනවා. Export කරද්දී downloaded Excel එකත් මේ format එකෙන්මයි.
+
+### 📊 Monthly dashboard (user level)
+මාසය select කරලා, user එක එකකට **OT Hrs · Normal Rev · OT Rev · Total Revenue
+· Incentive · Cost** බලන්න පුළුවන්.
+> **Cost** = incentive payout කියලා assume කරලා තියෙනවා. වෙනත් cost basis එකක්
+> (OT wage වගේ) ඕනේ නම් `calc.monthly_user_summary` එකේ `COST` line එක වෙනස් කරන්න.
 
 ---
 

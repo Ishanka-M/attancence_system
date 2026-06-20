@@ -178,13 +178,13 @@ def compute_incentive(
 
     # txn incentive per user
     txn_inc = {}
-    if not txn_df.empty and "USER ID" in txn_df:
-        col = "TXN INCENTIVE" if "TXN INCENTIVE" in txn_df else None
+    if not txn_df.empty and schema.T_USER in txn_df:
+        col = schema.T_INCENTIVE if schema.T_INCENTIVE in txn_df else None
         for _, r in txn_df.iterrows():
-            uid = str(r.get("USER ID", "")).strip()
+            uid = str(r.get(schema.T_USER, "")).strip()
             if not uid:
                 continue
-            txn_inc[uid] = txn_inc.get(uid, 0.0) + _f(r.get(col)) if col else txn_inc.get(uid, 0.0)
+            txn_inc[uid] = txn_inc.get(uid, 0.0) + (_f(r.get(col)) if col else 0.0)
 
     # complaints per user
     complaints = {}
@@ -264,12 +264,12 @@ def audit_ot_without_transaction(att_df: pd.DataFrame, txn_df: pd.DataFrame,
 
     # OT transactions තියෙන (user, date) keys
     ot_keys = set()
-    if not txn_df.empty and {"USER ID", "DATE", "TIME"} <= set(txn_df.columns):
+    if not txn_df.empty and {schema.T_USER, schema.T_DATE, schema.T_TIME} <= set(txn_df.columns):
         for _, t in txn_df.iterrows():
-            tt = str(t.get("TIME", "")).upper().replace(" ", "")
+            tt = str(t.get(schema.T_TIME, "")).upper().replace(" ", "")
             if tt in ("OT-N", "OT-D", "OTN", "OTD"):
-                d = _to_date(t.get("DATE"))
-                ot_keys.add((str(t.get("USER ID", "")).strip(), d.isoformat() if d else ""))
+                d = _to_date(t.get(schema.T_DATE))
+                ot_keys.add((str(t.get(schema.T_USER, "")).strip(), d.isoformat() if d else ""))
 
     flagged = []
     for _, a in att_df.iterrows():
@@ -322,11 +322,11 @@ def audit_missing_transactions(user_df: pd.DataFrame, txn_df: pd.DataFrame,
     diso = d.isoformat() if d else str(date_val)
 
     submitted = set()
-    if not txn_df.empty and {"USER ID", "DATE"} <= set(txn_df.columns):
+    if not txn_df.empty and {schema.T_USER, schema.T_DATE} <= set(txn_df.columns):
         for _, t in txn_df.iterrows():
-            td = _to_date(t.get("DATE"))
+            td = _to_date(t.get(schema.T_DATE))
             if td and td.isoformat() == diso:
-                submitted.add(str(t.get("USER ID", "")).strip())
+                submitted.add(str(t.get(schema.T_USER, "")).strip())
 
     rows = []
     for _, u in user_df.iterrows():
@@ -341,3 +341,91 @@ def audit_missing_transactions(user_df: pd.DataFrame, txn_df: pd.DataFrame,
                 "ISSUE": "මේ දිනයට TRANSACTION නෑ",
             })
     return pd.DataFrame(rows)
+
+
+# ═══════════════════════ MONTHLY user-level summary ═══════════════════════
+def _month_key(d: dt.date) -> str:
+    return f"{d.year}-{d.month:02d}"
+
+
+def add_month_col(df: pd.DataFrame, date_col: str) -> pd.DataFrame:
+    """date_col එක අනුව 'MONTH' (YYYY-MM) column එකක් add කරනවා."""
+    out = df.copy()
+    out["MONTH"] = out[date_col].apply(lambda x: (_to_date(x) and _month_key(_to_date(x))) or "")
+    return out
+
+
+def monthly_user_summary(txn_df: pd.DataFrame, att_df: pd.DataFrame,
+                         month: str | None = None) -> pd.DataFrame:
+    """
+    User × Month අනුව: Normal Rev, OT Rev, Total Revenue, Incentive, OT Hrs, Cost.
+      Revenue  = REVANUE-NORMAL + REVANUE-OT-N + REVANUE-OT-D
+      OT Rev   = REVANUE-OT-N + REVANUE-OT-D
+      Incentive= In (revenue/10)
+      OT Hrs   = ATTANDANCE.# OF OT HRS
+      Cost     = Incentive payout (company එකට යන වියදම — note බලන්න)
+    month දුන්නොත් ඒ මාසෙට filter වෙනවා.
+    """
+    recs = {}
+
+    def slot(uid, name, mon):
+        k = (mon, uid)
+        if k not in recs:
+            recs[k] = {"MONTH": mon, "USER ID": uid, "USER NAME": name,
+                       "NORMAL REV": 0.0, "OT REV": 0.0, "TOTAL REV": 0.0,
+                       "INCENTIVE": 0.0, "OT HRS": 0.0}
+        return recs[k]
+
+    if not txn_df.empty and schema.T_DATE in txn_df:
+        for _, t in txn_df.iterrows():
+            d = _to_date(t.get(schema.T_DATE))
+            if d is None:
+                continue
+            mon = _month_key(d)
+            uid = str(t.get(schema.T_USER, "")).strip()
+            if not uid:
+                continue
+            s = slot(uid, t.get(schema.T_NAME, ""), mon)
+            n = _f(t.get(schema.T_REV_N))
+            otn = _f(t.get(schema.T_REV_OTN))
+            otd = _f(t.get(schema.T_REV_OTD))
+            s["NORMAL REV"] += n
+            s["OT REV"] += otn + otd
+            s["TOTAL REV"] += n + otn + otd
+            s["INCENTIVE"] += _f(t.get(schema.T_INCENTIVE))
+
+    if not att_df.empty and schema.A_DATE in att_df:
+        for _, a in att_df.iterrows():
+            d = _to_date(a.get(schema.A_DATE))
+            if d is None:
+                continue
+            mon = _month_key(d)
+            uid = str(a.get(schema.A_USER, "")).strip()
+            if not uid:
+                continue
+            s = slot(uid, a.get("USER NAME", ""), mon)
+            s["OT HRS"] += _f(a.get(schema.A_OT))
+
+    df = pd.DataFrame(list(recs.values()))
+    if df.empty:
+        return df
+    df["COST"] = df["INCENTIVE"]          # Cost = incentive payout (assumption)
+    for c in ["NORMAL REV", "OT REV", "TOTAL REV", "INCENTIVE", "OT HRS", "COST"]:
+        df[c] = df[c].round(2)
+    if month:
+        df = df[df["MONTH"] == month]
+    return df.sort_values(["MONTH", "TOTAL REV"], ascending=[True, False])
+
+
+def filter_by_range(df: pd.DataFrame, date_col: str, start, end,
+                    user_id: str | None = None) -> pd.DataFrame:
+    """date range + (optional) user අනුව filter — download/export වලට."""
+    if df.empty or date_col not in df:
+        return df
+    out = df.copy()
+    s, e = _to_date(start), _to_date(end)
+    keep = out[date_col].apply(lambda x: (lambda d: d is not None and s <= d <= e)(_to_date(x)))
+    out = out[keep]
+    if user_id and user_id != "ALL" and "USER ID" in out:
+        out = out[out["USER ID"].astype(str).str.strip() == user_id]
+    return out

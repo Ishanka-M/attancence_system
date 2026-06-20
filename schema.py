@@ -80,28 +80,32 @@ SHEETS = {
     },
 
     # ===================== TRANSACTIONAL (daily entry) ==================
+    # headers මුල් Excel එකේ විදිහටම (order + names). "CSSTR00" = Description,
+    # "In" = transaction incentive (revenue/10). Column18 / OT -N = legacy empty.
     "TRANSACTION": {
         "title": "TRANSACTION",
         "kind": "txn",
         "seed": None,
         "headers": [
-            "UNIC CODE", "DATE", "USER ID", "USER NAME", "SITE", "CUSTOMMER",
-            "T-CODE", "DESCRIPTION", "TIME", "UOM", "# OF TRANSACTION",
-            "SMV", "UTILIZE HOURS",
-            "REVANUE-NORMAL", "REVANUE-OT-N", "REVANUE-OT-D",
-            "TOTAL REVANUE", "TXN INCENTIVE",
+            "UNIC CODE", "Date", "USER ID", "USER NAME", "SITE", "CUSTOMMER",
+            "T-CODE", "CSSTR00", "TIME", "UOM", "# OF TRANSACTION",
+            "SMV", "UTILIZE HOURS", "REVANUE-NORMAL", "REVANUE-OT -N",
+            "REVANUE-OT -D", "In", "Column18", "OT -N",
         ],
     },
     "ATTANDANCE": {
         "title": "ATTANDANCE",
         "kind": "txn",
         "seed": None,
+        # මුල් Excel columns 21 + system (audit) columns 3ක් අගට.
         "headers": [
             "UNIC CODE", "DATE", "USER ID", "USER NAME", "DEPARTMENT",
-            "SUB DEPARTMENT", "IN TIME", "OUT TIME", "LUNCH & TEA",
-            "WORK LOCATION", "IDLE TIME", "# OF WORKING HRS", "# OF OT HRS",
-            "SCHEDULED HRS", "UTILIZED HOURS", "UTILIZATION", "DAY", "REMARK",
-            "APPROVAL STATUS", "APPROVAL NOTE",
+            "SUB DEPARTMENT", "IN DATE & TIME", "OUT DATE & TIME", "LUNCH & TEA",
+            "WORCK LOCATION", "IDLE TIME", "# OF WORKING HRS", "# OF OT HRS",
+            "# APPROVED PRE OT HRS", "# APPROVED POST OT HRS",
+            "# APPROVED CLIENT OT HRS", "UTILIZED HOURS", "UTILIZATION",
+            "Day", "Remark", "Insentive",
+            "SCHEDULED HRS", "APPROVAL STATUS", "APPROVAL NOTE",
         ],
     },
     "OT APPROVAL": {
@@ -110,8 +114,13 @@ SHEETS = {
         "seed": None,
         "headers": [
             "UNIC", "REQUEST DATE", "OT PLANNED DATE", "SITE", "CLIENT",
-            "OPERATION", "USER ID", "USER NAME", "REQUEST OT HOURS",
-            "APPROVED OT HOURS", "APPROVED PERSON", "REASON FOR OT", "STATUS",
+            "OPERATION", "USER ID", "CSS USER NAME", "PRE REQUEST OT HOURS",
+            "REVESTED PERSON", "REQUEST OT HOURS", "PRE  OT APPROVED HOURS -SITE",
+            "PRE APPROVAL SITE PERSON", "PRE APPROVAL CLIENT",
+            "PRE APPROVED PERSON CLIENT", "REASON FOR OT", "MANAGEMENT APPROVAL",
+            "POST OT APPROVED SITE", "POST OT APPROVED SITE PERSON",
+            "POST OT APPROVAL CLIENT", "POST OT APPROVED CLIENT NAME",
+            "ACTUAL OT HRS.", "VARIATION",
         ],
     },
     "CUSTOMMER COMPLAINT": {
@@ -174,3 +183,13 @@ APPR_REJECTED = "REJECTED"
 
 MASTER_SHEETS = [k for k, v in SHEETS.items() if v["kind"] == "master"]
 TXN_SHEETS = [k for k, v in SHEETS.items() if v["kind"] == "txn"]
+
+# ───────────── Column-name constants (logic මේවා පාවිච්චි කරනවා) ─────────────
+# මුල් Excel headers වෙනස් වුණොත් මෙතන විතරක් වෙනස් කරන්න.
+# TRANSACTION
+T_DATE, T_USER, T_NAME, T_TIME, T_QTY = "Date", "USER ID", "USER NAME", "TIME", "# OF TRANSACTION"
+T_DESC, T_SMV, T_UTIL = "CSSTR00", "SMV", "UTILIZE HOURS"
+T_REV_N, T_REV_OTN, T_REV_OTD, T_INCENTIVE = "REVANUE-NORMAL", "REVANUE-OT -N", "REVANUE-OT -D", "In"
+# ATTANDANCE
+A_DATE, A_USER, A_WH, A_OT = "DATE", "USER ID", "# OF WORKING HRS", "# OF OT HRS"
+A_UTILIZED, A_UTILIZATION, A_STATUS = "UTILIZED HOURS", "UTILIZATION", "APPROVAL STATUS"
