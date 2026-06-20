@@ -1,0 +1,153 @@
+# 📊 EFL CSS — KPI & Incentive System
+
+මුල් **`KPI_CSS_-_EGF_OTH__2_.xlsb`** Excel file එක වෙනුවට හදපු
+**Streamlit + Python + Google Sheets** system එක.
+GitHub එකට push කරලා **Streamlit Cloud** එකේ free deploy කරන්න පුළුවන්.
+
+---
+
+## ✨ විශේෂාංග
+
+| Page | වැඩේ |
+|------|------|
+| ⚙️ **Setup** | Google Sheet එකේ **හැම tab එකක්ම auto-create** + masters seed |
+| 📝 **Transaction** | Activity එකක් දාද්දී SMV / Revenue / Incentive **auto-calculate** |
+| 🕐 **Attendance** | Working hrs, OT, Utilization auto |
+| ⏱️ **OT Approval** | OT request / approval tracking |
+| 📋 **Complaint** | Customer complaint log |
+| ✅ **KPI Update** | On-time KPI update tracking |
+| 💰 **Incentive** | User එක එකකට incentive එකතුව ගණනය + INSENTIVE sheet save |
+| 👥 **Masters** | USER-M, TCODE-M, SITE-M ... live edit |
+| 🏠 **Dashboard** | Revenue / incentive charts |
+
+> මුල් Excel එකේ data ඔක්කොම (336 T-codes, 110 users, 128 customers, sites,
+> locations, times) seed data විදිහට මේකට දාලා තියෙනවා — Setup එක run කළාම
+> Google Sheet එක ම පිරිලා එනවා.
+
+---
+
+## 🧮 Calculation Logic (Excel formulas → Python)
+
+මුල් Excel එකේ formulas reverse-engineer කරලා verify කරපු:
+
+```
+UTILIZE HOURS  = # OF TRANSACTION × SMV(M) ÷ 60
+REVANUE-NORMAL = # OF TRANSACTION × NORMAL rate     (TIME = NORMAL නම්)
+REVANUE-OT-N   = # OF TRANSACTION × OT-N rate        (TIME = OT -N නම්)
+REVANUE-OT-D   = # OF TRANSACTION × OT-D rate        (TIME = OT -D නම්)
+TXN INCENTIVE  = TOTAL REVANUE ÷ 10
+UTILIZATION    = UTILIZED HOURS ÷ # OF WORKING HRS
+```
+
+> ✅ මේ formulas මුල් Excel එකේ row එකක් (CSSTR0201, NORMAL, qty 128 →
+> revenue 793.06) එක්ක exact ගැළපුණා.
+
+Incentive rules (`schema.py` එකේ වෙනස් කරන්න පුළුවන්):
+`0-Complaint = 3000`, `On-time KPI = 4000`, `100% OT recovery = 3000`, `Target = 20000`.
+
+---
+
+## 🚀 Setup පියවරෙන් පියවර
+
+### 1️⃣ Google Cloud — Service Account හදන්න
+
+1. <https://console.cloud.google.com> → අලුත් **Project** එකක්.
+2. **APIs & Services → Library** → මේ දෙක **Enable** කරන්න:
+   - *Google Sheets API*
+   - *Google Drive API*
+3. **APIs & Services → Credentials → Create Credentials → Service Account**.
+4. Service account හදලා → **Keys → Add Key → JSON** → key file එක download වෙනවා.
+5. ඒ JSON එකේ තියෙන `client_email` එක copy කරගන්න
+   (උදා: `kpi-bot@project.iam.gserviceaccount.com`).
+
+### 2️⃣ Secrets දාන්න
+
+`.streamlit/secrets.toml.example` එක `.streamlit/secrets.toml` විදිහට copy කරලා,
+download කරපු JSON එකේ values දාන්න:
+
+```toml
+[app]
+spreadsheet_id = ""                 # තියෙන Sheet එකක් නම් URL එකේ id එක දාන්න
+spreadsheet_name = "EFL KPI System" # නැත්නම් මේ නමින් auto-create වෙයි
+share_email = "ඔයාගේ@gmail.com"     # auto-create වුණොත් මේකට share වෙයි
+
+[gcp_service_account]
+# ... JSON file එකේ field ඔක්කොම ...
+```
+
+> **වැදගත්:** දැනටමත් Google Sheet එකක් පාවිච්චි කරනවා නම්, ඒකේ **Share** එකෙන්
+> service account එකේ `client_email` එකට **Editor** permission දෙන්න. නැත්නම්
+> `spreadsheet_id` හිස් තියලා app එකට අලුත් එකක් හදන්න දෙන්න.
+
+### 3️⃣ Local run
+
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+App එක open වුණාම → **⚙️ Setup → 🚀 Sheets Auto-Create / Sync** click කරන්න.
+මේකෙන් Google Sheet එකේ tabs ඔක්කොම හැදිලා, masters seed වෙනවා.
+
+---
+
+## ☁️ GitHub + Streamlit Cloud Deploy
+
+### GitHub එකට push
+
+```bash
+cd kpi_system
+git init
+git add .
+git commit -m "EFL KPI system - initial"
+git branch -M main
+git remote add origin https://github.com/<ඔයාගේ-user>/<repo>.git
+git push -u origin main
+```
+
+> `.streamlit/secrets.toml` එක `.gitignore` එකේ block කරලා තියෙන නිසා
+> push වෙන්නේ නෑ — හරි.
+
+### Streamlit Cloud
+
+1. <https://share.streamlit.io> → **New app** → GitHub repo එක select කරන්න.
+2. **Main file path** = `app.py`.
+3. **Advanced settings → Secrets** එකට, ඔයාගේ `secrets.toml` content එකම paste කරන්න.
+4. **Deploy** → done. 🎉
+
+---
+
+## 📁 File structure
+
+```
+kpi_system/
+├── app.py            # Streamlit UI (pages 9යි)
+├── gsheets.py        # Google Sheets connect + AUTO-CREATE + read/write
+├── schema.py         # හැම sheet එකකම headers + incentive rules
+├── calc.py           # SMV / Revenue / Utilization / Incentive engine
+├── seeds.json        # මුල් Excel masters (T-codes, users, sites...)
+├── requirements.txt
+├── .gitignore
+├── .streamlit/
+│   └── secrets.toml.example
+└── README.md
+```
+
+---
+
+## 🔧 Customize කරන්න
+
+- **අලුත් column / sheet:** `schema.py` එකේ `SHEETS` dict එකට දාන්න — Setup එක
+  run කළාම auto-create වෙනවා.
+- **Incentive rules වෙනස්:** `schema.py` උඩ තියෙන constants වෙනස් කරන්න.
+- **T-code rates update:** 👥 Masters → `TCODE-M` → cell edit → Save.
+
+---
+
+## ⚠️ සටහන්
+
+- OT revenue counted වෙන්නේ TIME එක හරියට select කළොත් විතරයි (NORMAL / OT -N / OT -D).
+- මුල් Excel එකේ dates *serial number* (උදා 46174) විදිහට තිබුණා — මේ system එක
+  සාමාන්‍ය `YYYY-MM-DD` dates පාවිච්චි කරනවා (clean).
+- `OT RECOVERY %` දැනට manual/0 — recovery data source එකක් තිබ්බොත් `calc.compute_incentive`
+  එකේ `ot_recovery` dict එකට pass කරන්න පුළුවන්.

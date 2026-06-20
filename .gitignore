@@ -1,0 +1,15 @@
+# secrets — කවදාවත් commit කරන්න එපා
+.streamlit/secrets.toml
+*.json.key
+service_account*.json
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# os
+.DS_Store
+Thumbs.db
