@@ -49,10 +49,11 @@ def _holidays_set():
 
 
 def style_flag(df: pd.DataFrame, color="#ffd6d6"):
-    """Audit dataframe එකක් මුළුමනින්ම highlight (warning) කරනවා."""
+    """Audit dataframe එකක් highlight කරනවා — background + dark text (readable)."""
     if df is None or df.empty:
         return df
-    return df.style.apply(lambda _: [f"background-color:{color}"] * len(df.columns), axis=1)
+    css = f"background-color:{color};color:#1f1f1f"
+    return df.style.apply(lambda _: [css] * len(df.columns), axis=1)
 
 
 def user_picker(label="USER", key=None):
@@ -159,7 +160,7 @@ if IS_ADMIN:
         "🔍 Audit", "📥 Export", "📤 Upload", "🛡️ Admin", "🗂️ Data Manager",
     ]
 else:
-    PAGES = ["🏠 Dashboard", "📝 Transaction", "🕐 Attendance", "💰 Incentive"]
+    PAGES = ["🏠 Dashboard", "📝 Transaction", "🕐 Attendance", "💰 Incentive", "📤 Upload"]
 
 page = st.sidebar.radio("Menu", PAGES, label_visibility="collapsed")
 
@@ -671,6 +672,22 @@ elif page == "📤 Upload":
             st.stop()
         raw = raw.fillna("")
         st.write(f"කියෙව්වා: {len(raw)} rows")
+
+        # User role නම් තමන්ගේ USER ID එකට විතරක් scope කරනවා
+        if not IS_ADMIN:
+            if "USER ID" not in raw.columns:
+                raw["USER ID"] = CURRENT_UID
+            else:
+                raw["USER ID"] = raw["USER ID"].apply(
+                    lambda x: CURRENT_UID if not str(x).strip() else str(x).strip())
+            other = raw[raw["USER ID"] != CURRENT_UID]
+            if len(other):
+                st.warning(f"⚠️ ඔයාගේ USER ID ({CURRENT_UID}) නොවන rows {len(other)}ක් "
+                           "skip කරනවා — user ලට තමන්ගේ data විතරක් upload කරන්න පුළුවන්.")
+            raw = raw[raw["USER ID"] == CURRENT_UID]
+            if raw.empty:
+                st.info("Upload කරන්න ඔයාගේ rows නෑ.")
+                st.stop()
 
         # ─────────────── TRANSACTION ───────────────
         if target == "TRANSACTION":
