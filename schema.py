@@ -158,7 +158,7 @@ SHEETS = {
 }
 
 # Incentive rule constants (INSENTIVE sheet headers එකෙන් ආ values)
-ZERO_COMPLAINT_BONUS = 3000      # complaints නැත්නම්
+ZERO_COMPLAINT_BONUS = 0         # complaints නැත්නම් (දැන් 0 — bonus නෑ)
 ONTIME_KPI_BONUS = 4000          # KPI on-time update bonus
 FULL_OT_RECOVERY_BONUS = 3000    # 100% OT recovery bonus
 TXN_INCENTIVE_DIVISOR = 10       # Transaction incentive = revenue / 10
