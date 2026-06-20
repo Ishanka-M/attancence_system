@@ -271,15 +271,16 @@ if st.sidebar.button("Logout"):
 # ── role අනුව pages ──
 if IS_ADMIN:
     PAGES = [
-        "🏠 Dashboard", "⚙️ Setup", "📝 Transaction", "🕐 Attendance",
+        "🏠 Dashboard", "🎛️ Meters", "⚙️ Setup", "📝 Transaction", "🕐 Attendance",
         "⏱️ OT Approval", "📋 Complaint", "✅ KPI Update", "💰 Incentive",
         "💵 Cost/Revenue", "🔍 Audit", "📥 Export", "📤 Upload", "🛡️ Admin",
         "🗂️ Data Manager",
     ]
 else:
-    PAGES = ["🏠 Dashboard", "📝 Transaction", "🕐 Attendance", "💰 Incentive", "📤 Upload"]
+    PAGES = ["🏠 Dashboard", "🎛️ Meters", "📝 Transaction", "🕐 Attendance",
+             "💰 Incentive", "📤 Upload"]
     if IS_LEADER:
-        PAGES.insert(4, "🔍 Audit")   # leader -> team Audit
+        PAGES.insert(5, "🔍 Audit")   # leader -> team Audit
 
 page = st.sidebar.radio("Menu", PAGES, label_visibility="collapsed")
 
@@ -377,12 +378,15 @@ elif page == "🏠 Dashboard":
         trend = summ_all.groupby("MONTH")["TOTAL REV"].sum()
         st.line_chart(trend)
 
-    # ── Company-wide meters (current month) — හැම user කෙනෙක්ටම ──
-    st.divider()
+
+# ═══════════════════════════ METERS (analog) ═══════════════════════════
+elif page == "🎛️ Meters":
+    st.header("🎛️ Analog Meters")
     this_month = dt.date.today().strftime("%Y-%m")
+    st.caption(f"Company-wide · {this_month} · හැම user කෙනෙක්ටම")
     full_txn = gsheets.get_df("TRANSACTION")   # unscoped: company-wide
 
-    st.subheader(f"🏢 SITE level — Transaction Volume ({this_month})")
+    st.subheader("🏢 SITE level — Transaction Volume")
     sv = calc.site_volume_month(full_txn, this_month)
     if sv.empty:
         st.info("මේ මාසෙට transactions නෑ.")
@@ -396,7 +400,8 @@ elif page == "🏠 Dashboard":
     else:
         st.bar_chart(sv.set_index("SITE")["VOLUME"], color="#4da3ff")
 
-    st.subheader(f"🏆 වැඩිම Transaction කරපු Top 5 ({this_month})")
+    st.divider()
+    st.subheader("🏆 වැඩිම Transaction කරපු Top 5")
     top5 = calc.top_users_volume(full_txn, this_month, 5)
     if top5.empty:
         st.info("මේ මාසෙට data නෑ.")
