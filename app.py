@@ -310,7 +310,7 @@ if IS_ADMIN:
         "🛡️ Admin", "🗂️ Data Manager",
     ]
 else:
-    PAGES = ["🏠 Dashboard", "📝 Transaction", "🕐 Attendance",
+    PAGES = ["🏠 Dashboard", "🎛️ Meters", "📝 Transaction", "🕐 Attendance",
              "💰 Incentive", "🔍 Audit", "🗂️ Data Manager", "📤 Upload"]
 
 page = st.sidebar.radio("Menu", PAGES, label_visibility="collapsed")
@@ -437,9 +437,6 @@ elif page == "🏠 Dashboard":
 # ═══════════════════════════ METERS (analog) ═══════════════════════════
 elif page == "🎛️ Meters":
     st.header("🎛️ Analog Meters")
-    if not IS_ADMIN:
-        st.warning("Admins only.")
-        st.stop()
     this_month = dt.date.today().strftime("%Y-%m")
     st.caption(f"Company-wide · {this_month} · for everyone")
     full_txn = gsheets.get_df("TRANSACTION")   # unscoped: company-wide
