@@ -297,9 +297,7 @@ if IS_ADMIN:
     ]
 else:
     PAGES = ["🏠 Dashboard", "📝 Transaction", "🕐 Attendance",
-             "💰 Incentive", "📤 Upload"]
-    if IS_LEADER:
-        PAGES.insert(4, "🔍 Audit")   # leader -> team Audit
+             "💰 Incentive", "🔍 Audit", "📤 Upload"]
 
 page = st.sidebar.radio("Menu", PAGES, label_visibility="collapsed")
 
@@ -865,8 +863,8 @@ elif page == "🕒 OT Report":
 
 # ═══════════════════════════ AUDIT ═══════════════════════════
 elif page == "🔍 Audit":
-    st.header("🔍 Audit — Rule Violations"
-              + ("" if IS_ADMIN else " (ඔයාගේ team)"))
+    _scope_lbl = "" if IS_ADMIN else (" (ඔයාගේ team)" if IS_LEADER else " (ඔයාගේ)")
+    st.header("🔍 Audit — Rule Violations" + _scope_lbl)
     try:
         att = scope_df(gsheets.get_df("ATTANDANCE"))   # leader -> team scope
         txn = scope_df(gsheets.get_df("TRANSACTION"))
