@@ -90,6 +90,22 @@ hr { border-color:var(--line); }
 </style>
 """, unsafe_allow_html=True)
 
+# ── version check: stale calc.py/schema.py partial-deploy එකකදී පැහැදිලි message ──
+_REQUIRED_CALC = [
+    "unic_serial", "fmt_date", "fmt_datetime", "excel_serial", "team_user_ids",
+    "compute_attendance", "cost_revenue_report", "audit_monthly_ot",
+    "validate_attendance_upload", "site_volume_month", "top_users_volume",
+]
+_missing = [f for f in _REQUIRED_CALC if not hasattr(calc, f)]
+if _missing:
+    st.error(
+        "⚠️ පරණ file version එකක් deploy වෙලා. GitHub repo එකට **calc.py "
+        "(සහ schema.py) අලුත් version** push කරලා, Streamlit Cloud → Manage app "
+        "→ **Reboot** කරන්න.\n\n"
+        f"calc.py එකේ නැති functions: `{', '.join(_missing)}`"
+    )
+    st.stop()
+
 TIME_OPTIONS = [schema.TIME_NORMAL, schema.TIME_OT_N, schema.TIME_OT_D]
 
 
