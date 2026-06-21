@@ -1067,3 +1067,142 @@ def date_range_list(start, end):
         out.append(cur)
         cur += dt.timedelta(days=1)
     return out
+
+
+# ═══════════════════════ DATA AUDIT ENGINE (integrity) ═══════════════════════
+def data_audit_attendance(att_df: pd.DataFrame, holidays: set, txn_df=None):
+    """
+    ATTANDANCE data integrity check (rule-violations නෙවෙයි — data errors):
+      • LEAVE/OFF rows වල IN/OUT time හෝ OT/working hrs තියෙනවද (තිබිය යුතු නෑ)
+      • working hrs = (OUT−IN)−lunch ද? OT = working−scheduled ද? scheduled හරිද?
+      • UNIC CODE = serial+uid ද? DATE format හරිද?
+    return: issues DataFrame [UNIC CODE, DATE, USER ID, USER NAME, FIELD, CURRENT, EXPECTED, ISSUE]
+    """
+    cols = ["UNIC CODE", "DATE", "USER ID", "USER NAME", "FIELD", "CURRENT", "EXPECTED", "ISSUE"]
+    if att_df is None or att_df.empty:
+        return pd.DataFrame(columns=cols)
+    issues = []
+    for _, a in att_df.iterrows():
+        d = _to_date(a.get("DATE"))
+        uid = str(a.get("USER ID", "")).strip()
+        loc = str(a.get("WORCK LOCATION", "")).strip()
+        in_s = str(a.get("IN DATE & TIME", "")).strip()
+        out_s = str(a.get("OUT DATE & TIME", "")).strip()
+        wh = _f(a.get("# OF WORKING HRS"))
+        ot = _f(a.get("# OF OT HRS"))
+        sched_stored = a.get("SCHEDULED HRS", "")
+        unic = str(a.get("UNIC CODE", "")).strip()
+        base = {"UNIC CODE": unic, "DATE": a.get("DATE", ""), "USER ID": uid,
+                "USER NAME": a.get("USER NAME", "")}
+
+        def add(field, cur, exp, issue):
+            issues.append({**base, "FIELD": field, "CURRENT": cur, "EXPECTED": exp, "ISSUE": issue})
+
+        # UNIC CODE
+        if d and uid:
+            exp_u = unic_serial(d, uid)
+            if unic != exp_u:
+                add("UNIC CODE", unic, exp_u, "UNIC CODE should be Excel-serial + USER ID")
+
+        if is_non_work_location(loc):
+            # LEAVE / OFF -> IN/OUT/OT/working තිබිය යුතු නෑ
+            if in_s:
+                add("IN DATE & TIME", in_s, "(empty)", f"{loc}: IN time should be empty")
+            if out_s:
+                add("OUT DATE & TIME", out_s, "(empty)", f"{loc}: OUT time should be empty")
+            if ot != 0:
+                add("# OF OT HRS", ot, 0, f"{loc}: OT should be 0")
+            if wh != 0:
+                add("# OF WORKING HRS", wh, 0, f"{loc}: working hrs should be 0")
+        elif in_s and out_s:
+            lunch = _f(a.get("LUNCH & TEA"), 1.0) or 1.0
+            exp_wh = compute_work_hours(in_s, out_s, lunch)
+            exp_sched = scheduled_hours(d, holidays) if d else 0
+            exp_ot = round(max(exp_wh - exp_sched, 0.0), 2)
+            if abs(wh - exp_wh) > 0.02:
+                add("# OF WORKING HRS", wh, exp_wh, "Working ≠ (OUT−IN) − LUNCH")
+            if abs(ot - exp_ot) > 0.02:
+                add("# OF OT HRS", ot, exp_ot, "OT ≠ working − scheduled")
+            if str(sched_stored).strip() and abs(_f(sched_stored) - exp_sched) > 0.02:
+                add("SCHEDULED HRS", sched_stored, round(exp_sched, 2), "Scheduled hrs mismatch")
+    return pd.DataFrame(issues, columns=cols)
+
+
+def fix_attendance_df(att_df: pd.DataFrame, holidays: set, txn_df=None):
+    """data_audit_attendance හමුවුණ වැරදි හදනවා — corrected ATTANDANCE df එකක් return."""
+    if att_df is None or att_df.empty:
+        return att_df
+    out = att_df.copy().astype(object)
+    util_lut = {}
+    if txn_df is not None and not txn_df.empty and \
+       {schema.T_USER, schema.T_DATE, schema.T_UTIL} <= set(txn_df.columns):
+        for _, t in txn_df.iterrows():
+            d = _to_date(t.get(schema.T_DATE))
+            if d is None:
+                continue
+            k = (str(t.get(schema.T_USER, "")).strip(), d.isoformat())
+            util_lut[k] = util_lut.get(k, 0.0) + _f(t.get(schema.T_UTIL))
+    for i in out.index:
+        d = _to_date(out.at[i, "DATE"])
+        uid = str(out.at[i, "USER ID"]).strip()
+        loc = str(out.at[i, "WORCK LOCATION"]).strip()
+        if d and uid:
+            out.at[i, "UNIC CODE"] = unic_serial(d, uid)
+            out.at[i, "DATE"] = fmt_date(d)
+            out.at[i, "Day"] = d.strftime("%a").upper()
+        if is_non_work_location(loc):
+            out.at[i, "IN DATE & TIME"] = ""
+            out.at[i, "OUT DATE & TIME"] = ""
+            out.at[i, "# OF WORKING HRS"] = 0
+            out.at[i, "# OF OT HRS"] = 0
+            out.at[i, "UTILIZED HOURS"] = 0
+            out.at[i, "UTILIZATION"] = 0
+            out.at[i, "SCHEDULED HRS"] = round(scheduled_hours(d, holidays), 2) if d else ""
+            continue
+        in_s = str(out.at[i, "IN DATE & TIME"]).strip()
+        out_s = str(out.at[i, "OUT DATE & TIME"]).strip()
+        if in_s and out_s:
+            lunch = _f(out.at[i, "LUNCH & TEA"], 1.0) or 1.0
+            utilized = util_lut.get((uid, d.isoformat()) if d else ("", ""), 0.0)
+            res = compute_attendance(out.at[i, "DATE"], in_s, out_s, lunch, utilized, holidays)
+            out.at[i, "IN DATE & TIME"] = fmt_datetime(in_s)
+            out.at[i, "OUT DATE & TIME"] = fmt_datetime(out_s)
+            out.at[i, "# OF WORKING HRS"] = res["working"]
+            out.at[i, "# OF OT HRS"] = res["ot"]
+            out.at[i, "SCHEDULED HRS"] = res["sched"]
+            if utilized:
+                out.at[i, "UTILIZED HOURS"] = round(utilized, 2)
+                out.at[i, "UTILIZATION"] = res["utilization"]
+    return out
+
+
+def data_audit_transaction(txn_df: pd.DataFrame, tcode_lut: dict):
+    """TRANSACTION calculation integrity — SMV/UTILIZE/REVANUE/In vs recompute."""
+    cols = ["UNIC CODE", "DATE", "USER ID", "T-CODE", "FIELD", "CURRENT", "EXPECTED", "ISSUE"]
+    if txn_df is None or txn_df.empty:
+        return pd.DataFrame(columns=cols)
+    issues = []
+    for _, t in txn_df.iterrows():
+        code = str(t.get("T-CODE", "")).strip()
+        info = tcode_lut.get(code, {})
+        r = calc_transaction(info, t.get(schema.T_TIME, ""), t.get(schema.T_QTY, 0))
+        base = {"UNIC CODE": t.get("UNIC CODE", ""), "DATE": t.get(schema.T_DATE, ""),
+                "USER ID": t.get(schema.T_USER, ""), "T-CODE": code}
+
+        def add(field, cur, exp, issue):
+            issues.append({**base, "FIELD": field, "CURRENT": cur, "EXPECTED": exp, "ISSUE": issue})
+
+        checks = [
+            ("SMV", _f(t.get(schema.T_SMV)), r["smv"]),
+            ("UTILIZE HOURS", _f(t.get(schema.T_UTIL)), r["utilize_hours"]),
+            (schema.T_REV_N, _f(t.get(schema.T_REV_N)), r["rev_normal"]),
+            (schema.T_REV_OTN, _f(t.get(schema.T_REV_OTN)), r["rev_otn"]),
+            (schema.T_REV_OTD, _f(t.get(schema.T_REV_OTD)), r["rev_otd"]),
+            (schema.T_INCENTIVE, _f(t.get(schema.T_INCENTIVE)), r["txn_incentive"]),
+        ]
+        for field, cur, exp in checks:
+            if abs(cur - exp) > 0.02:
+                add(field, round(cur, 4), round(exp, 4), f"{field} ≠ recomputed")
+        if not info and code:
+            add("T-CODE", code, "", "T-CODE not found in TCODE-M")
+    return pd.DataFrame(issues, columns=cols)

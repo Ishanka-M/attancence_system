@@ -97,6 +97,7 @@ _REQUIRED_CALC = [
     "validate_attendance_upload", "site_volume_month", "top_users_volume",
     "top_users_revenue", "ot_report", "recompute_attendance_df",
     "recompute_transaction_df", "bulk_attendance_rows", "date_range_list",
+    "data_audit_attendance", "fix_attendance_df", "data_audit_transaction",
 ]
 _missing = [f for f in _REQUIRED_CALC if not hasattr(calc, f)]
 if not hasattr(gsheets, "upsert_rows"):
@@ -306,14 +307,30 @@ if IS_ADMIN:
     PAGES = [
         "🏠 Dashboard", "🎛️ Meters", "⚙️ Setup", "📝 Transaction", "🕐 Attendance",
         "⏱️ OT Approval", "📋 Complaint", "✅ KPI Update", "💰 Incentive",
-        "💵 Cost/Revenue", "🕒 OT Report", "🔍 Audit", "📥 Export", "📤 Upload",
-        "🛡️ Admin", "🗂️ Data Manager",
+        "💵 Cost/Revenue", "🕒 OT Report", "🔍 Audit", "🧪 Data Audit",
+        "📥 Export", "📤 Upload", "🛡️ Admin", "🗂️ Data Manager",
     ]
 else:
     PAGES = ["🏠 Dashboard", "🎛️ Meters", "📝 Transaction", "🕐 Attendance",
              "💰 Incentive", "🔍 Audit", "🗂️ Data Manager", "📤 Upload"]
 
 page = st.sidebar.radio("Menu", PAGES, label_visibility="collapsed")
+
+# ── Data Audit notification: user who entered wrong data gets notified ──
+MY_DATA_ISSUES = None
+if not IS_ADMIN:
+    try:
+        _ia = calc.data_audit_attendance(scope_df(gsheets.get_df("ATTANDANCE")),
+                                         _holidays_set(), gsheets.get_df("TRANSACTION"))
+        _it = calc.data_audit_transaction(scope_df(gsheets.get_df("TRANSACTION")),
+                                          calc.build_tcode_lookup(_tcodes()))
+        MY_DATA_ISSUES = (_ia, _it)
+        _ni = len(_ia) + len(_it)
+        if _ni:
+            st.sidebar.warning(f"⚠️ Data Audit: {_ni} issue(s) in your records — "
+                               "see 🏠 Dashboard.")
+    except Exception:
+        MY_DATA_ISSUES = None
 
 # ── footer brand ──
 st.sidebar.markdown(
@@ -380,6 +397,24 @@ elif page == "🏠 Dashboard":
     c2.metric("Total Revenue", f"{total_rev:,.0f}")
     c3.metric("Total Incentive", f"{total_inc:,.0f}")
     c4.metric("Total OT Hrs", f"{total_ot:,.1f}")
+
+    # ── 🧪 Data Audit notification — "you entered wrong data" ──
+    if not IS_ADMIN and MY_DATA_ISSUES is not None:
+        _ia, _it = MY_DATA_ISSUES
+        _ni = len(_ia) + len(_it)
+        if _ni:
+            st.error(f"🧪 **Data Audit notice:** You entered some incorrect data — "
+                     f"{_ni} issue(s) found in your records. Please review and correct "
+                     "them (or contact your admin).")
+            with st.expander(f"See the {_ni} data issue(s)", expanded=False):
+                if not _ia.empty:
+                    st.markdown("**Attendance**")
+                    st.dataframe(style_flag(_ia[["DATE", "FIELD", "CURRENT", "EXPECTED", "ISSUE"]], "#ffe0e0"),
+                                 use_container_width=True, hide_index=True)
+                if not _it.empty:
+                    st.markdown("**Transaction**")
+                    st.dataframe(style_flag(_it[["DATE", "T-CODE", "FIELD", "CURRENT", "EXPECTED", "ISSUE"]], "#ffe0e0"),
+                                 use_container_width=True, hide_index=True)
 
     # ── 🔍 Audit panel (මාසේ 1 → today, scoped) — violations තියෙනවා නම් විතරක් ──
     _hol = _holidays_set()
@@ -953,6 +988,70 @@ elif page == "🕒 OT Report":
         st.download_button("⬇️ Excel download", buf.getvalue(),
                            file_name=f"OT_Report_{d_from}_{d_to}.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+# ═══════════════════════════ DATA AUDIT (integrity) ═══════════════════════════
+elif page == "🧪 Data Audit":
+    st.header("🧪 Data Audit — Integrity & Calculation Check")
+    if not IS_ADMIN:
+        st.warning("Admins only.")
+        st.stop()
+    st.caption("Checks for data errors (not rule violations): LEAVE/OFF rows with "
+               "IN/OUT or OT, working/OT/scheduled miscalculations, wrong UNIC CODE, "
+               "and transaction SMV/revenue/incentive mismatches. Fix updates the sheets.")
+
+    holidays = _holidays_set()
+    tab_a, tab_t = st.tabs(["🕐 Attendance integrity", "📝 Transaction integrity"])
+
+    # ── Attendance ──
+    with tab_a:
+        att = gsheets.get_df("ATTANDANCE")
+        txn = gsheets.get_df("TRANSACTION")
+        issues = calc.data_audit_attendance(att, holidays, txn)
+        if issues.empty:
+            st.success("✅ No attendance data issues — all calculations correct.")
+        else:
+            _byissue = issues.groupby("ISSUE").size().reset_index(name="Count")
+            st.error(f"⚠️ {len(issues)} data issues across {issues['UNIC CODE'].nunique()} rows.")
+            bc = st.columns(min(len(_byissue), 4) or 1)
+            for i, (_, rr) in enumerate(_byissue.iterrows()):
+                bc[i % len(bc)].metric(rr["ISSUE"][:22], rr["Count"])
+            st.dataframe(style_flag(issues, "#ffe0e0"), use_container_width=True, hide_index=True)
+
+            import io
+            buf = io.BytesIO()
+            with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+                issues.to_excel(xw, sheet_name="Attendance Issues", index=False)
+            st.download_button("⬇️ Issues report (Excel)", buf.getvalue(),
+                               file_name="data_audit_attendance.xlsx",
+                               mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+            st.warning("🔧 Fix will recompute working/OT/scheduled, clear IN/OUT & zero "
+                       "LEAVE/OFF rows, and correct UNIC CODE / date format.")
+            if st.button("🔧 Fix all attendance data", type="primary"):
+                fixed = calc.fix_attendance_df(att, holidays, txn)
+                gsheets.overwrite("ATTANDANCE", fixed)
+                st.success(f"✅ Fixed — {len(issues)} issues resolved.")
+                st.cache_data.clear()
+                st.rerun()
+
+    # ── Transaction ──
+    with tab_t:
+        txn = gsheets.get_df("TRANSACTION")
+        lut = calc.build_tcode_lookup(_tcodes())
+        t_issues = calc.data_audit_transaction(txn, lut)
+        if t_issues.empty:
+            st.success("✅ No transaction calculation issues.")
+        else:
+            st.error(f"⚠️ {len(t_issues)} calculation issues across "
+                     f"{t_issues['UNIC CODE'].nunique()} rows.")
+            st.dataframe(style_flag(t_issues, "#ffe0e0"), use_container_width=True, hide_index=True)
+            if st.button("🔧 Fix all transaction calculations", type="primary"):
+                fixed = calc.recompute_transaction_df(txn, lut)
+                gsheets.overwrite("TRANSACTION", fixed)
+                st.success(f"✅ Fixed — {len(t_issues)} issues resolved.")
+                st.cache_data.clear()
+                st.rerun()
 
 
 # ═══════════════════════════ AUDIT ═══════════════════════════
