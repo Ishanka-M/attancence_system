@@ -297,7 +297,7 @@ if IS_ADMIN:
     ]
 else:
     PAGES = ["🏠 Dashboard", "📝 Transaction", "🕐 Attendance",
-             "💰 Incentive", "🔍 Audit", "📤 Upload"]
+             "💰 Incentive", "🔍 Audit", "🗂️ Data Manager", "📤 Upload"]
 
 page = st.sidebar.radio("Menu", PAGES, label_visibility="collapsed")
 
@@ -1228,33 +1228,39 @@ elif page == "🛡️ Admin":
 
 # ═══════════════════════════ DATA MANAGER ═══════════════════════════
 elif page == "🗂️ Data Manager":
-    st.header("🗂️ Data Manager — Add / Update / Delete")
-    if not IS_ADMIN:
-        st.warning("Admin ලට පමණයි.")
-        st.stop()
+    st.header("🗂️ Data Manager — Add / Update / Delete"
+              + ("" if IS_ADMIN else (" (ඔයාගේ team)" if IS_LEADER else " (ඔයාගේ)")))
 
-    # Admin CRUD කරන්න පුළුවන් sheets — user ඉල්ලපු ඒවා මුලින්
-    editable = ["USER-M", "CUSTOMMER-M", "TCODE-M", "CUSTOMMER COMPLAINT"]
-    editable += [s for s in (schema.MASTER_SHEETS + schema.TXN_SHEETS)
-                 if s not in editable and s != "INSENTIVE"]
+    if IS_ADMIN:
+        # Admin -> හැම sheet එකම
+        editable = ["USER-M", "CUSTOMMER-M", "TCODE-M", "CUSTOMMER COMPLAINT"]
+        editable += [s for s in (schema.MASTER_SHEETS + schema.TXN_SHEETS)
+                     if s not in editable and s != "INSENTIVE"]
+    else:
+        # User/Leader -> තමන්ගේ/team එකේ ATTANDANCE + TRANSACTION විතරක්
+        editable = ["ATTANDANCE", "TRANSACTION"]
+        st.caption("ඔයාට ඔයාගේ"
+                   + (" team එකේ" if IS_LEADER else "")
+                   + " ATTANDANCE සහ TRANSACTION records edit/delete කරන්න පුළුවන්.")
 
     mkey = st.selectbox("Sheet", editable)
-    df = gsheets.get_df(mkey)
+    full_df = gsheets.get_df(mkey)
+    # non-admin -> තමන්ගේ/team scope එකට විතරක්
+    view = scope_df(full_df) if not IS_ADMIN else full_df
 
     # ── date filter (ATTANDANCE/TRANSACTION වැනි date column තියෙන sheets) ──
-    date_col = "Date" if "Date" in df.columns else ("DATE" if "DATE" in df.columns else None)
-    view = df
+    date_col = "Date" if "Date" in full_df.columns else ("DATE" if "DATE" in full_df.columns else None)
     use_dt = False
-    if date_col and not df.empty:
+    if date_col and not view.empty:
         use_dt = st.checkbox(f"📅 {date_col} එකෙන් filter කරන්න", value=True)
         if use_dt:
             _t = dt.date.today()
             fc1, fc2 = st.columns(2)
             d_from = fc1.date_input("From", _t.replace(day=1), key=f"dm_from_{mkey}")
             d_to = fc2.date_input("To", _t, key=f"dm_to_{mkey}")
-            _dmask = df[date_col].apply(
+            _dmask = view[date_col].apply(
                 lambda x: (lambda d: d is not None and d_from <= d <= d_to)(calc._to_date(x)))
-            view = df[_dmask]
+            view = view[_dmask]
             st.caption(f"{calc.fmt_date(d_from)} – {calc.fmt_date(d_to)} range එකේ {len(view)} records")
 
     # optional search filter
@@ -1263,12 +1269,11 @@ elif page == "🗂️ Data Manager":
         mask = view.apply(lambda r: r.astype(str).str.contains(q, case=False, na=False).any(), axis=1)
         view = view[mask]
 
-    _filtered = bool(use_dt or q.strip())
-    st.caption(f"{len(df)} total records • **cell double-click → edit** · "
-               "**පහළ ➕ row → add** · **🗑️ Delete? tick කරලා → delete** · "
-               "අන්තිමට 💾 Save.")
+    # non-admin නම් හැම විටම partial-save (අනිත් users ගේ rows preserve කරන්න)
+    _partial = bool(use_dt or q.strip() or not IS_ADMIN)
+    st.caption(f"{len(view)} records පෙන්නනවා • **cell double-click → edit** · "
+               "**පහළ ➕ row → add** · **🗑️ Delete? tick කරලා → delete** · අන්තිමට 💾 Save.")
 
-    # 🗑️ Delete? column එකක් මුලට දානවා — delete එක පැහැදිලියි
     work = view.copy()
     work.insert(0, "🗑️ Delete?", False)
     edited = st.data_editor(
@@ -1282,18 +1287,33 @@ elif page == "🗂️ Data Manager":
     c1, c2 = st.columns([1, 4])
     if c1.button(f"💾 Save ({ndel} delete)" if ndel else "💾 Save", type="primary"):
         kept = edited[~edited["🗑️ Delete?"].fillna(False)].drop(columns=["🗑️ Delete?"])
-        if _filtered:
-            # filter කරපු rows විතරක් replace — පෙන්නපු නැති ඒවා තියාගන්නවා
-            hidden = df[~df.index.isin(view.index)]
+
+        # non-admin -> තමන්ගේ/team USER ID rows විතරක් (පිට users ට save කරන්න බෑ)
+        if not IS_ADMIN and "USER ID" in kept.columns and ALLOWED_UIDS is not None:
+            kept["USER ID"] = kept["USER ID"].apply(
+                lambda x: CURRENT_UID if not str(x).strip() else str(x).strip())
+            bad = kept[~kept["USER ID"].isin(ALLOWED_UIDS)]
+            if len(bad):
+                st.warning(f"⚠️ ඔයාට අදාළ නොවන USER ID rows {len(bad)}ක් skip කරනවා.")
+            kept = kept[kept["USER ID"].isin(ALLOWED_UIDS)]
+
+        if _partial:
+            hidden = full_df[~full_df.index.isin(view.index)]
             final = pd.concat([hidden, kept], ignore_index=True)
         else:
             final = kept.reset_index(drop=True)
+
+        # ATTANDANCE -> UNIC CODE duplicate වළක්වනවා (අන්තිම row තියාගන්නවා)
+        if mkey == "ATTANDANCE" and "UNIC CODE" in final.columns:
+            final = final[final["UNIC CODE"].astype(str).str.strip() != ""].drop_duplicates(
+                subset="UNIC CODE", keep="last").reset_index(drop=True)
+
         gsheets.overwrite(mkey, final)
         st.success(f"{mkey} update කළා ✅ — {len(final)} rows ({ndel} deleted)")
         st.cache_data.clear()
         st.rerun()
-    c2.caption("⚠️ Save කළාම add + edit + delete (ticked rows) එකවර apply වෙනවා. "
-               "Filter කරලා save කළත් අනිත් (පෙන්නපු නැති) rows safe.")
+    c2.caption("⚠️ Save කළාම add + edit + delete එකවර apply වෙනවා. "
+               "Filter/scope කරලා save කළත් අනිත් rows safe.")
 
     if mkey == "TCODE-M":
         st.info("ℹ️ TCODE-M = මුල් Excel එකේ *Master sheet - Finalized* (SMV/rate engine). "
