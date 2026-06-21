@@ -95,7 +95,8 @@ _REQUIRED_CALC = [
     "unic_serial", "fmt_date", "fmt_datetime", "excel_serial", "team_user_ids",
     "compute_attendance", "cost_revenue_report", "audit_monthly_ot",
     "validate_attendance_upload", "site_volume_month", "top_users_volume",
-    "top_users_revenue", "ot_report",
+    "top_users_revenue", "ot_report", "recompute_attendance_df",
+    "recompute_transaction_df",
 ]
 _missing = [f for f in _REQUIRED_CALC if not hasattr(calc, f)]
 if not hasattr(gsheets, "upsert_rows"):
@@ -466,30 +467,29 @@ elif page == "📝 Transaction":
         st.stop()
     lut = calc.build_tcode_lookup(tdf)
 
-    with st.form("txn"):
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            date_v = st.date_input("DATE", dt.date.today())
-            uid, uname = user_picker("USER", key="txn_user")
-        with c2:
-            site = st.text_input("SITE", "EGF")
-            cust = st.text_input("CUSTOMMER", "")
-        with c3:
-            code = st.selectbox("T-CODE", sorted(lut.keys()),
-                                format_func=lambda c: f'{c} — {lut[c]["desc"][:30]}')
-            time_t = st.selectbox("TIME", TIME_OPTIONS)
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        date_v = st.date_input("DATE", dt.date.today())
+        uid, uname = user_picker("USER", key="txn_user")
+    with c2:
+        site = st.text_input("SITE", "EGF")
+        cust = st.text_input("CUSTOMMER", "")
+    with c3:
+        code = st.selectbox("T-CODE", sorted(lut.keys()),
+                            format_func=lambda c: f'{c} — {lut[c]["desc"][:30]}')
+        time_t = st.selectbox("TIME", TIME_OPTIONS)
 
-        qty = st.number_input("# OF TRANSACTION", min_value=0.0, step=1.0)
+    qty = st.number_input("# OF TRANSACTION", min_value=0.0, step=1.0)
 
-        # live preview
-        info = lut.get(code, {})
-        prev = calc.calc_transaction(info, time_t, qty)
-        p1, p2, p3 = st.columns(3)
-        p1.metric("Utilize Hours", f'{prev["utilize_hours"]:.3f}')
-        p2.metric("Total Revenue", f'{prev["total_rev"]:,.2f}')
-        p3.metric("Txn Incentive", f'{prev["txn_incentive"]:,.2f}')
+    # live preview
+    info = lut.get(code, {})
+    prev = calc.calc_transaction(info, time_t, qty)
+    p1, p2, p3 = st.columns(3)
+    p1.metric("Utilize Hours", f'{prev["utilize_hours"]:.3f}')
+    p2.metric("Total Revenue", f'{prev["total_rev"]:,.2f}')
+    p3.metric("Txn Incentive", f'{prev["txn_incentive"]:,.2f}')
 
-        submitted = st.form_submit_button("➕ Add Transaction", type="primary")
+    submitted = st.button("➕ Add Transaction", type="primary")
 
     if submitted and uid:
         r = calc.calc_transaction(lut.get(code, {}), time_t, qty)
@@ -545,41 +545,40 @@ elif page == "🕐 Attendance":
             st.cache_data.clear()
 
     else:
-        with st.form("att"):
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                date_v = st.date_input("DATE", dt.date.today())
-                uid, uname = user_picker("USER", key="att_user")
-            with c2:
-                in_t = st.time_input("IN TIME", dt.time(8, 0))
-                out_t = st.time_input("OUT TIME", dt.time(17, 0))
-            with c3:
-                loc = st.selectbox("WORK LOCATION", loc_opts)
-                lunch = st.number_input("LUNCH & TEA (hrs)", 0.0, 5.0,
-                                        float(schema.LUNCH_TEA_HOURS), 0.25)
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            date_v = st.date_input("DATE", dt.date.today())
+            uid, uname = user_picker("USER", key="att_user")
+        with c2:
+            in_t = st.time_input("IN TIME", dt.time(8, 0))
+            out_t = st.time_input("OUT TIME", dt.time(17, 0))
+        with c3:
+            loc = st.selectbox("WORK LOCATION", loc_opts)
+            lunch = st.number_input("LUNCH & TEA (hrs)", 0.0, 5.0,
+                                    float(schema.LUNCH_TEA_HOURS), 0.25)
 
-            # ── auto-compute: WORKING = (OUT−IN) − LUNCH, OT = WORKING − SCHEDULED ──
-            in_dt = dt.datetime.combine(date_v, in_t)
-            out_dt = dt.datetime.combine(date_v, out_t)
-            if out_dt < in_dt:
-                out_dt += dt.timedelta(days=1)   # රෑ පහුවෙනවා නම්
-            res = calc.compute_attendance(date_v, in_dt.isoformat(" "),
-                                          out_dt.isoformat(" "), lunch, 0, holidays)
-            wh, ot, sched = res["working"], res["ot"], res["sched"]
+        # ── auto-compute: WORKING = (OUT−IN) − LUNCH, OT = WORKING − SCHEDULED ──
+        in_dt = dt.datetime.combine(date_v, in_t)
+        out_dt = dt.datetime.combine(date_v, out_t)
+        if out_dt < in_dt:
+            out_dt += dt.timedelta(days=1)   # රෑ පහුවෙනවා නම්
+        res = calc.compute_attendance(date_v, in_dt.isoformat(" "),
+                                      out_dt.isoformat(" "), lunch, 0, holidays)
+        wh, ot, sched = res["working"], res["ot"], res["sched"]
 
-            i1, i2, i3, i4 = st.columns(4)
-            i1.metric("Working HRS", f"{wh:.2f}", help="(OUT − IN) − LUNCH & TEA")
-            i2.metric("OT HRS", f"{ot:.2f}")
-            i3.metric("Scheduled", f"{sched:.0f}")
-            i4.metric("Day", date_v.strftime("%a"))
-            remark = st.text_input("REMARK", "")
+        i1, i2, i3, i4 = st.columns(4)
+        i1.metric("Working HRS", f"{wh:.2f}", help="(OUT − IN) − LUNCH & TEA")
+        i2.metric("OT HRS", f"{ot:.2f}")
+        i3.metric("Scheduled", f"{sched:.0f}")
+        i4.metric("Day", date_v.strftime("%a"))
+        remark = st.text_input("REMARK", "")
 
-            needs_appr, reason = calc.attendance_needs_approval(wh, date_v, holidays)
-            if needs_appr:
-                st.warning(f"⚠️ Approval ඕනේ: {reason}. "
-                           + ("Admin නිසා approve වෙයි." if IS_ADMIN
-                              else "PENDING විදිහට save වෙයි."))
-            submitted = st.form_submit_button("➕ Add Attendance", type="primary")
+        needs_appr, reason = calc.attendance_needs_approval(wh, date_v, holidays)
+        if needs_appr:
+            st.warning(f"⚠️ Approval ඕනේ: {reason}. "
+                       + ("Admin නිසා approve වෙයි." if IS_ADMIN
+                          else "PENDING විදිහට save වෙයි."))
+        submitted = st.button("➕ Add Attendance", type="primary")
 
         if submitted and uid:
             # UTILIZED HOURS = ඒ user+date එකට TRANSACTION වල utilize එකතුව
@@ -1284,6 +1283,11 @@ elif page == "🗂️ Data Manager":
     )
 
     ndel = int(edited["🗑️ Delete?"].fillna(False).sum())
+    recalc = False
+    if mkey in ("ATTANDANCE", "TRANSACTION"):
+        recalc = st.checkbox(
+            "🔄 IN/OUT (හෝ T-CODE/qty) වලින් auto-recalculate කරන්න", value=True,
+            help="ATTANDANCE: working/OT/scheduled · TRANSACTION: SMV/revenue/In නැවත ගණනය")
     c1, c2 = st.columns([1, 4])
     if c1.button(f"💾 Save ({ndel} delete)" if ndel else "💾 Save", type="primary"):
         kept = edited[~edited["🗑️ Delete?"].fillna(False)].drop(columns=["🗑️ Delete?"])
@@ -1303,13 +1307,21 @@ elif page == "🗂️ Data Manager":
         else:
             final = kept.reset_index(drop=True)
 
+        # 🔄 auto recalculate
+        if recalc and mkey == "ATTANDANCE":
+            final = calc.recompute_attendance_df(final, _holidays_set(),
+                                                 gsheets.get_df("TRANSACTION"))
+        elif recalc and mkey == "TRANSACTION":
+            final = calc.recompute_transaction_df(final, calc.build_tcode_lookup(_tcodes()))
+
         # ATTANDANCE -> UNIC CODE duplicate වළක්වනවා (අන්තිම row තියාගන්නවා)
         if mkey == "ATTANDANCE" and "UNIC CODE" in final.columns:
             final = final[final["UNIC CODE"].astype(str).str.strip() != ""].drop_duplicates(
                 subset="UNIC CODE", keep="last").reset_index(drop=True)
 
         gsheets.overwrite(mkey, final)
-        st.success(f"{mkey} update කළා ✅ — {len(final)} rows ({ndel} deleted)")
+        st.success(f"{mkey} update කළා ✅ — {len(final)} rows ({ndel} deleted)"
+                   + (" · recalculated 🔄" if recalc else ""))
         st.cache_data.clear()
         st.rerun()
     c2.caption("⚠️ Save කළාම add + edit + delete එකවර apply වෙනවා. "

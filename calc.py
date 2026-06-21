@@ -886,3 +886,67 @@ def ot_report(att_df: pd.DataFrame, holidays: set, start=None, end=None):
     df = pd.DataFrame(rows, columns=["USER ID", "USER NAME", "WORKED DAYS",
                                      "OT-N HRS", "OT-D HRS", "TOTAL OT HRS"])
     return df.sort_values("TOTAL OT HRS", ascending=False).reset_index(drop=True) if not df.empty else df
+
+
+def recompute_attendance_df(df: pd.DataFrame, holidays: set,
+                            txn_df: pd.DataFrame = None) -> pd.DataFrame:
+    """
+    ATTANDANCE df එකක working/OT/scheduled/utilization, IN/OUT − LUNCH වලින්
+    නැවත calculate කරනවා (Data Manager edit වලට). approval/remark වැනි ඒවා තියාගන්නවා.
+    LEAVE rows (working=0) අත නෑ.
+    """
+    if df is None or df.empty:
+        return df
+    out = df.copy().astype(object)
+    util_lut = {}
+    if txn_df is not None and not txn_df.empty and \
+       {schema.T_USER, schema.T_DATE, schema.T_UTIL} <= set(txn_df.columns):
+        for _, t in txn_df.iterrows():
+            d = _to_date(t.get(schema.T_DATE))
+            if d is None:
+                continue
+            k = (str(t.get(schema.T_USER, "")).strip(), d.isoformat())
+            util_lut[k] = util_lut.get(k, 0.0) + _f(t.get(schema.T_UTIL))
+    for i in out.index:
+        loc = str(out.at[i, "WORCK LOCATION"]).strip().upper() if "WORCK LOCATION" in out else ""
+        in_s = str(out.at[i, "IN DATE & TIME"]).strip() if "IN DATE & TIME" in out else ""
+        out_s = str(out.at[i, "OUT DATE & TIME"]).strip() if "OUT DATE & TIME" in out else ""
+        if loc == "LEAVE" or not in_s or not out_s:
+            continue   # leave / IN-OUT නැති rows අත නෑ
+        d = _to_date(out.at[i, "DATE"]) if "DATE" in out else None
+        uid = str(out.at[i, "USER ID"]).strip() if "USER ID" in out else ""
+        lunch = _f(out.at[i, "LUNCH & TEA"], 1.0) or 1.0
+        utilized = util_lut.get((uid, d.isoformat()) if d else ("", ""), 0.0)
+        res = compute_attendance(out.at[i, "DATE"], in_s, out_s, lunch, utilized, holidays)
+        out.at[i, "# OF WORKING HRS"] = res["working"]
+        out.at[i, "# OF OT HRS"] = res["ot"]
+        out.at[i, "SCHEDULED HRS"] = res["sched"]
+        if utilized:
+            out.at[i, "UTILIZED HOURS"] = round(utilized, 2)
+            out.at[i, "UTILIZATION"] = res["utilization"]
+    return out
+
+
+def recompute_transaction_df(df: pd.DataFrame, tcode_lut: dict) -> pd.DataFrame:
+    """
+    TRANSACTION df එකක SMV/UTILIZE/REVANUE/In, T-CODE/TIME/qty වලින් නැවත calculate.
+    """
+    if df is None or df.empty:
+        return df
+    out = df.copy().astype(object)
+    for i in out.index:
+        code = str(out.at[i, "T-CODE"]).strip() if "T-CODE" in out else ""
+        info = tcode_lut.get(code, {})
+        r = calc_transaction(info, out.at[i, schema.T_TIME] if schema.T_TIME in out else "",
+                             out.at[i, schema.T_QTY] if schema.T_QTY in out else 0)
+        if "CSSTR00" in out and not str(out.at[i, "CSSTR00"]).strip():
+            out.at[i, "CSSTR00"] = info.get("desc", "")
+        if "UOM" in out and not str(out.at[i, "UOM"]).strip():
+            out.at[i, "UOM"] = info.get("uom", "")
+        out.at[i, "SMV"] = r["smv"]
+        out.at[i, "UTILIZE HOURS"] = r["utilize_hours"]
+        out.at[i, schema.T_REV_N] = r["rev_normal"]
+        out.at[i, schema.T_REV_OTN] = r["rev_otn"]
+        out.at[i, schema.T_REV_OTD] = r["rev_otd"]
+        out.at[i, schema.T_INCENTIVE] = r["txn_incentive"]
+    return out
