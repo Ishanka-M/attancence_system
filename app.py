@@ -1241,14 +1241,30 @@ elif page == "🗂️ Data Manager":
     mkey = st.selectbox("Sheet", editable)
     df = gsheets.get_df(mkey)
 
-    # optional search filter (loud datasets වල පහසුවට)
-    q = st.text_input("🔎 Search (optional)", "")
+    # ── date filter (ATTANDANCE/TRANSACTION වැනි date column තියෙන sheets) ──
+    date_col = "Date" if "Date" in df.columns else ("DATE" if "DATE" in df.columns else None)
     view = df
-    if q.strip():
-        mask = df.apply(lambda r: r.astype(str).str.contains(q, case=False, na=False).any(), axis=1)
-        view = df[mask]
+    use_dt = False
+    if date_col and not df.empty:
+        use_dt = st.checkbox(f"📅 {date_col} එකෙන් filter කරන්න", value=True)
+        if use_dt:
+            _t = dt.date.today()
+            fc1, fc2 = st.columns(2)
+            d_from = fc1.date_input("From", _t.replace(day=1), key=f"dm_from_{mkey}")
+            d_to = fc2.date_input("To", _t, key=f"dm_to_{mkey}")
+            _dmask = df[date_col].apply(
+                lambda x: (lambda d: d is not None and d_from <= d <= d_to)(calc._to_date(x)))
+            view = df[_dmask]
+            st.caption(f"{calc.fmt_date(d_from)} – {calc.fmt_date(d_to)} range එකේ {len(view)} records")
 
-    st.caption(f"{len(df)} records • **cell double-click → edit** · "
+    # optional search filter
+    q = st.text_input("🔎 Search (optional)", "")
+    if q.strip():
+        mask = view.apply(lambda r: r.astype(str).str.contains(q, case=False, na=False).any(), axis=1)
+        view = view[mask]
+
+    _filtered = bool(use_dt or q.strip())
+    st.caption(f"{len(df)} total records • **cell double-click → edit** · "
                "**පහළ ➕ row → add** · **🗑️ Delete? tick කරලා → delete** · "
                "අන්තිමට 💾 Save.")
 
@@ -1257,7 +1273,7 @@ elif page == "🗂️ Data Manager":
     work.insert(0, "🗑️ Delete?", False)
     edited = st.data_editor(
         work, use_container_width=True, num_rows="dynamic",
-        hide_index=True, key=f"ed_{mkey}_{q}",
+        hide_index=True, key=f"ed_{mkey}_{q}_{use_dt}",
         column_config={"🗑️ Delete?": st.column_config.CheckboxColumn(
             "🗑️ Delete?", help="මේ row එක delete කරන්න tick කරන්න", default=False)},
     )
@@ -1266,8 +1282,8 @@ elif page == "🗂️ Data Manager":
     c1, c2 = st.columns([1, 4])
     if c1.button(f"💾 Save ({ndel} delete)" if ndel else "💾 Save", type="primary"):
         kept = edited[~edited["🗑️ Delete?"].fillna(False)].drop(columns=["🗑️ Delete?"])
-        if q.strip():
-            # search filter එකක් තිබ්බොත් — පෙන්නපු rows විතරක් replace, ඉතුරු තියාගන්නවා
+        if _filtered:
+            # filter කරපු rows විතරක් replace — පෙන්නපු නැති ඒවා තියාගන්නවා
             hidden = df[~df.index.isin(view.index)]
             final = pd.concat([hidden, kept], ignore_index=True)
         else:
@@ -1276,7 +1292,8 @@ elif page == "🗂️ Data Manager":
         st.success(f"{mkey} update කළා ✅ — {len(final)} rows ({ndel} deleted)")
         st.cache_data.clear()
         st.rerun()
-    c2.caption("⚠️ Save කළාම add + edit + delete (ticked rows) එකවර apply වෙනවා.")
+    c2.caption("⚠️ Save කළාම add + edit + delete (ticked rows) එකවර apply වෙනවා. "
+               "Filter කරලා save කළත් අනිත් (පෙන්නපු නැති) rows safe.")
 
     if mkey == "TCODE-M":
         st.info("ℹ️ TCODE-M = මුල් Excel එකේ *Master sheet - Finalized* (SMV/rate engine). "
