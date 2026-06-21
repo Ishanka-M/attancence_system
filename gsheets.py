@@ -216,3 +216,36 @@ def overwrite(sheet_key: str, df: pd.DataFrame):
     body = [list(df.columns)] + df.fillna("").astype(str).values.tolist()
     ws.update("A1", body, value_input_option="USER_ENTERED")
     get_df.clear()
+
+
+def upsert_rows(sheet_key: str, rows: list, key_col: str = "UNIC CODE"):
+    """
+    key_col අනුව upsert — key තියෙනවා නම් row එක UPDATE, නැත්නම් ADD.
+    ATTANDANCE UNIC CODE වගේ unique key එකකට duplicate වළක්වයි.
+    return: (added, updated).
+    """
+    headers = schema.SHEETS[sheet_key]["headers"]
+    if key_col not in headers:
+        append_rows(sheet_key, rows)
+        return (len(rows), 0)
+    ki = headers.index(key_col)
+    df = get_df(sheet_key)
+    if df.empty:
+        existing, key_index = [], {}
+    else:
+        existing = df.reindex(columns=headers).fillna("").astype(str).values.tolist()
+        key_index = {str(r[ki]).strip(): idx for idx, r in enumerate(existing)}
+    added = updated = 0
+    for row in rows:
+        srow = ["" if v is None else str(v) for v in row]
+        k = srow[ki].strip()
+        if k and k in key_index:
+            existing[key_index[k]] = srow
+            updated += 1
+        else:
+            existing.append(srow)
+            if k:
+                key_index[k] = len(existing) - 1
+            added += 1
+    overwrite(sheet_key, pd.DataFrame(existing, columns=headers))
+    return (added, updated)

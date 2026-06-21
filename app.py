@@ -98,6 +98,8 @@ _REQUIRED_CALC = [
     "top_users_revenue", "ot_report",
 ]
 _missing = [f for f in _REQUIRED_CALC if not hasattr(calc, f)]
+if not hasattr(gsheets, "upsert_rows"):
+    _missing.append("gsheets.upsert_rows")
 if _missing:
     st.error(
         "⚠️ පරණ file version එකක් deploy වෙලා. GitHub repo එකට **calc.py "
@@ -540,8 +542,8 @@ elif page == "🕐 Attendance":
             row = [calc.unic_serial(date_v, uid), calc.fmt_date(date_v), uid, uname,
                    dept, subdept, "", "", 0, "LEAVE", "", 0, 0, "", "", "", 0, 0,
                    date_v.strftime("%a").upper(), rmk, "", sched, schema.APPR_OK, "Leave"]
-            gsheets.append_rows("ATTANDANCE", [row])
-            st.success(f"🌴 Leave add කලා ✅ — {leave_type} ({calc.fmt_date(date_v)})")
+            added, updated = gsheets.upsert_rows("ATTANDANCE", [row], "UNIC CODE")
+            st.success(f"🌴 Leave {'update' if updated else 'add'} කලා ✅ — {leave_type} ({calc.fmt_date(date_v)})")
             st.cache_data.clear()
 
     else:
@@ -608,11 +610,13 @@ elif page == "🕐 Attendance":
                 round(util_hrs, 2), util, date_v.strftime("%a").upper(),
                 remark, "", sched, status, note,
             ]
-            gsheets.append_rows("ATTANDANCE", [row])
+            added, updated = gsheets.upsert_rows("ATTANDANCE", [row], "UNIC CODE")
+            _verb = "Updated" if updated else "Added"
             if status == schema.APPR_PENDING:
-                st.warning(f"PENDING විදිහට save කළා ⏳ ({reason})")
+                st.warning(f"PENDING විදිහට {_verb.lower()} කළා ⏳ ({reason})")
             else:
-                st.success(f"Added ✅  Working {wh:.2f}h · OT {ot:.2f}h · Util {util:.1%}")
+                st.success(f"{_verb} ✅  Working {wh:.2f}h · OT {ot:.2f}h · Util {util:.1%}"
+                           + (" (පැරණි row එක update කළා)" if updated else ""))
             st.cache_data.clear()
 
     st.divider()
@@ -1129,24 +1133,15 @@ elif page == "📤 Upload":
 
             to_add = save_df if mode.startswith("ඔක්කොම") else save_df[~pending_mask]
 
-            # ── duplicate UNIC CODE skip (දෙපාරක් upload වැළැක්වීම) ──
-            dedup = st.checkbox("දැනටමත් තියෙන UNIC CODE rows skip කරන්න", value=True)
-            n_dup = 0
-            if dedup and not existing.empty and "UNIC CODE" in existing:
-                exist_codes = set(existing["UNIC CODE"].astype(str).str.strip())
-                before = len(to_add)
-                to_add = to_add[~to_add["UNIC CODE"].astype(str).str.strip().isin(exist_codes)]
-                n_dup = before - len(to_add)
-                if n_dup:
-                    st.info(f"ℹ️ දැනටමත් තියෙන {n_dup} rows (UNIC CODE duplicate) skip කරනවා.")
-
-            st.subheader(f"Add වෙන {len(to_add)} rows (preview)")
+            st.info("ℹ️ UNIC CODE එක දැනටමත් තියෙනවා නම් ඒ row එක **update** වෙනවා "
+                    "(duplicate වෙන්නේ නෑ).")
+            st.subheader(f"{len(to_add)} rows (preview)")
             st.dataframe(to_add.head(50), use_container_width=True, hide_index=True)
 
-            if len(to_add) and st.button(f"⬆️ {len(to_add)} rows add කරන්න", type="primary"):
-                gsheets.append_rows("ATTANDANCE", to_add.fillna("").astype(str).values.tolist())
-                st.success(f"{len(to_add)} rows add කළා ✅"
-                           + (f" · {n_dup} duplicate skip" if n_dup else "")
+            if len(to_add) and st.button(f"⬆️ {len(to_add)} rows upsert කරන්න", type="primary"):
+                added, updated = gsheets.upsert_rows(
+                    "ATTANDANCE", to_add.fillna("").astype(str).values.tolist(), "UNIC CODE")
+                st.success(f"✅ {added} add · {updated} update"
                            + (f" · {n_pending} PENDING" if mode.startswith("ඔක්කොම") and n_pending else ""))
                 st.cache_data.clear()
 
