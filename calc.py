@@ -197,7 +197,7 @@ def attendance_needs_approval(working_hrs, date_val, holidays: set | None = None
     if _f(working_hrs) > schema.WORKING_HRS_CAP:
         reasons.append(f"WORKING HRS {_f(working_hrs):.1f} > {schema.WORKING_HRS_CAP} cap")
     if is_rest_day(date_val, holidays):
-        reasons.append("නිවාඩු/ඉරිදා දවසට attendance")
+        reasons.append("Attendance on holiday/Sunday")
     return (len(reasons) > 0, " ; ".join(reasons))
 
 
@@ -387,7 +387,7 @@ def audit_ot_without_transaction(att_df: pd.DataFrame, txn_df: pd.DataFrame,
         if key not in ot_keys:
             row = a.to_dict()
             row["EXTRA HRS"] = round(ot_h, 2)
-            row["ISSUE"] = "OT වැඩ කරලා OT-N/OT-D transaction නෑ"
+            row["ISSUE"] = "OT worked but no OT-N/OT-D transaction"
             flagged.append(row)
     return pd.DataFrame(flagged)
 
@@ -465,7 +465,7 @@ def audit_missing_transactions(user_df: pd.DataFrame, txn_df: pd.DataFrame,
             rows.append({
                 "DATE": diso, "USER ID": uid, "USER NAME": u.get("USER NAME", ""),
                 "DEPARTMENT": u.get("DEPARTMENT", ""),
-                "ISSUE": "මේ දිනයට TRANSACTION නෑ",
+                "ISSUE": "No transaction on this date",
             })
     return pd.DataFrame(rows)
 
@@ -958,4 +958,87 @@ def recompute_transaction_df(df: pd.DataFrame, tcode_lut: dict) -> pd.DataFrame:
         out.at[i, schema.T_REV_OTN] = r["rev_otn"]
         out.at[i, schema.T_REV_OTD] = r["rev_otd"]
         out.at[i, schema.T_INCENTIVE] = r["txn_incentive"]
+    return out
+
+
+# ───────── Bulk attendance generation (all active users) ─────────
+# Default shift times by weekday: (IN hour, OUT hour). Mon-Fri 8-17, Sat/Sun 8-13.
+SHIFT_TIMES = {0: (8, 17), 1: (8, 17), 2: (8, 17), 3: (8, 17), 4: (8, 17),
+               5: (8, 13), 6: (8, 13)}
+
+
+def bulk_attendance_rows(user_df, dates, holidays, txn_df=None,
+                         weekday_lunch=1.0, weekend_lunch=0.0, location="EGF",
+                         only_uids=None, admin=False):
+    """
+    Generate ATTANDANCE rows for every ACTIVE user in USER-M, for each date.
+      Mon-Fri 08:00-17:00, Sat/Sun 08:00-13:00. Working/OT auto-computed.
+      Rest-day (Sun/holiday) rows -> PENDING (admin approval). admin=True -> APPROVED.
+    Returns a list of rows (ATTANDANCE header order) ready for upsert.
+    """
+    H = schema.SHEETS["ATTANDANCE"]["headers"]
+    if user_df is None or user_df.empty:
+        return []
+    # utilized-hours lookup from transactions
+    util_lut = {}
+    if txn_df is not None and not txn_df.empty and \
+       {schema.T_USER, schema.T_DATE, schema.T_UTIL} <= set(txn_df.columns):
+        for _, t in txn_df.iterrows():
+            d = _to_date(t.get(schema.T_DATE))
+            if d is None:
+                continue
+            k = (str(t.get(schema.T_USER, "")).strip(), d.isoformat())
+            util_lut[k] = util_lut.get(k, 0.0) + _f(t.get(schema.T_UTIL))
+
+    rows = []
+    for _, u in user_df.iterrows():
+        if str(u.get("ACTIVE", "")).strip().upper() in ("N", "NO", "0", "INACTIVE"):
+            continue
+        uid = str(u.get("USER ID", "")).strip()
+        if not uid or (only_uids is not None and uid not in only_uids):
+            continue
+        name = u.get("USER NAME", "")
+        dept = u.get("DEPARTMENT", "")
+        sub = u.get("SUB DEPARTMENT", "")
+        for d in dates:
+            wd = d.weekday()
+            in_h, out_h = SHIFT_TIMES.get(wd, (8, 17))
+            lunch = weekend_lunch if wd >= 5 else weekday_lunch
+            in_dt = dt.datetime(d.year, d.month, d.day, in_h, 0)
+            out_dt = dt.datetime(d.year, d.month, d.day, out_h, 0)
+            utilized = util_lut.get((uid, d.isoformat()), 0.0)
+            res = compute_attendance(d, in_dt.isoformat(" "), out_dt.isoformat(" "),
+                                     lunch, utilized, holidays)
+            needs, reason = attendance_needs_approval(res["working"], d, holidays)
+            if not needs:
+                status, note = schema.APPR_OK, ""
+            elif admin:
+                status, note = schema.APPR_APPROVED, f"Bulk admin approved: {reason}"
+            else:
+                status, note = schema.APPR_PENDING, reason
+            row = {h: "" for h in H}
+            row.update({
+                "UNIC CODE": unic_serial(d, uid), "DATE": fmt_date(d),
+                "USER ID": uid, "USER NAME": name, "DEPARTMENT": dept,
+                "SUB DEPARTMENT": sub, "IN DATE & TIME": fmt_datetime(in_dt),
+                "OUT DATE & TIME": fmt_datetime(out_dt), "LUNCH & TEA": lunch,
+                "WORCK LOCATION": location, "# OF WORKING HRS": res["working"],
+                "# OF OT HRS": res["ot"], "UTILIZED HOURS": round(utilized, 2),
+                "UTILIZATION": res["utilization"], "Day": d.strftime("%a").upper(),
+                "SCHEDULED HRS": res["sched"], "APPROVAL STATUS": status,
+                "APPROVAL NOTE": note,
+            })
+            rows.append([row[h] for h in H])
+    return rows
+
+
+def date_range_list(start, end):
+    """start..end (inclusive) date list."""
+    s, e = _to_date(start), _to_date(end)
+    if s is None or e is None or e < s:
+        return []
+    out, cur = [], s
+    while cur <= e:
+        out.append(cur)
+        cur += dt.timedelta(days=1)
     return out

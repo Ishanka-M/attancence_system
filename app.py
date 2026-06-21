@@ -96,17 +96,17 @@ _REQUIRED_CALC = [
     "compute_attendance", "cost_revenue_report", "audit_monthly_ot",
     "validate_attendance_upload", "site_volume_month", "top_users_volume",
     "top_users_revenue", "ot_report", "recompute_attendance_df",
-    "recompute_transaction_df",
+    "recompute_transaction_df", "bulk_attendance_rows", "date_range_list",
 ]
 _missing = [f for f in _REQUIRED_CALC if not hasattr(calc, f)]
 if not hasattr(gsheets, "upsert_rows"):
     _missing.append("gsheets.upsert_rows")
 if _missing:
     st.error(
-        "⚠️ පරණ file version එකක් deploy වෙලා. GitHub repo එකට **calc.py "
-        "(සහ schema.py) අලුත් version** push කරලා, Streamlit Cloud → Manage app "
-        "→ **Reboot** කරන්න.\n\n"
-        f"calc.py එකේ නැති functions: `{', '.join(_missing)}`"
+        "⚠️ An old file version is deployed. Push **calc.py "
+        "(and schema.py) latest version**, then Streamlit Cloud → Manage app "
+        "→ click **Reboot**.\n\n"
+        f"Missing functions in calc.py: `{', '.join(_missing)}`"
     )
     st.stop()
 
@@ -115,8 +115,8 @@ TIME_OPTIONS = [schema.TIME_NORMAL, schema.TIME_OT_N, schema.TIME_OT_D]
 
 # ───────────────────────── helpers ─────────────────────────
 def unic(date_val, user_id: str) -> str:
-    """UNIC CODE = Excel serial + USER ID — ATTANDANCE සහ TRANSACTION දෙකම සමානයි.
-    එක දවසක attendance ↔ transactions UNIC CODE එකෙන් match කරගන්න පුළුවන්."""
+    """UNIC CODE = Excel serial + USER ID — same in both ATTANDANCE and TRANSACTION,
+    so a day's attendance and transactions can be matched by UNIC CODE."""
     return calc.unic_serial(date_val, user_id)
 
 
@@ -139,7 +139,7 @@ def _holidays_set():
 
 
 def style_flag(df: pd.DataFrame, color="#ffd6d6"):
-    """Audit dataframe එකක් highlight කරනවා — background + dark text (readable)."""
+    """Highlights an audit dataframe — background + dark text (readable)."""
     if df is None or df.empty:
         return df
     css = f"background-color:{color};color:#1f1f1f"
@@ -147,7 +147,7 @@ def style_flag(df: pd.DataFrame, color="#ffd6d6"):
 
 
 def _clear_audit_rows(unics, status, note):
-    """අදාළ UNIC CODE rows වල ATTANDANCE APPROVAL STATUS + NOTE update කරලා clear කරනවා."""
+    """Updates APPROVAL STATUS + NOTE for the matching UNIC CODE rows to clear them."""
     df = gsheets.get_df("ATTANDANCE")
     if df.empty or "UNIC CODE" not in df.columns:
         return 0
@@ -160,7 +160,7 @@ def _clear_audit_rows(unics, status, note):
 
 
 def gauge(value, max_value, title, color="#4da3ff", suffix=""):
-    """Analog meter (gauge) — dark theme. st.plotly_chart වලින් render කරන්න."""
+    """Analog meter (gauge) — dark theme. Render with st.plotly_chart."""
     mx = max_value if max_value and max_value > 0 else 1
     fig = go.Figure(go.Indicator(
         mode="gauge+number",
@@ -194,7 +194,7 @@ def user_picker(label="USER", key=None):
         st.caption(f"👤 {CURRENT_UID} — {CURRENT_UNAME}")
         return CURRENT_UID, CURRENT_UNAME
     if df.empty:
-        st.warning("USER-M හිස්. මුලින් Setup එකෙන් sheets create කරන්න.")
+        st.warning("USER-M is empty. Create sheets from Setup first.")
         return None, None
     if not IS_ADMIN and ALLOWED_UIDS is not None:  # leader -> team විතරක්
         df = df[df["USER ID"].astype(str).str.strip().isin(ALLOWED_UIDS)]
@@ -208,7 +208,7 @@ def user_picker(label="USER", key=None):
 
 
 def scope_df(df: pd.DataFrame) -> pd.DataFrame:
-    """Admin -> සියල්ල. Leader -> team. User -> තමන් විතරක්. (USER ID අනුව)"""
+    """Admin -> all. Leader -> team. User -> own only. (by USER ID)"""
     if IS_ADMIN or ALLOWED_UIDS is None or df is None or df.empty or "USER ID" not in df:
         return df
     return df[df["USER ID"].astype(str).str.strip().isin(ALLOWED_UIDS)]
@@ -227,7 +227,7 @@ st.sidebar.caption("KPI System")
 try:
     gsheets.get_spreadsheet()
 except Exception as e:
-    st.error("Google Sheet සම්බන්ධ වෙන්නෑ — secrets.toml බලන්න.")
+    st.error("Cannot connect to Google Sheet — check secrets.toml.")
     st.exception(e)
     st.stop()
 
@@ -246,7 +246,7 @@ def _login_screen():
     with tab_u:
         udf = _users()
         if udf.empty:
-            st.warning("USER-M හිස්. Admin login වෙලා Setup → Auto-Create කරන්න.")
+            st.warning("USER-M is empty. Login as admin and run Setup → Auto-Create.")
         else:
             opts = {f'{r["USER ID"]} — {r["USER NAME"]}': (str(r["USER ID"]).strip(),
                     r.get("USER NAME", ""), str(r.get("PASSWORD", "")).strip())
@@ -254,10 +254,10 @@ def _login_screen():
             sel = st.selectbox("USER ID", list(opts.keys()), key="login_uid")
             uid, uname, pw = opts[sel]
             entered = st.text_input("Password", type="password", key="login_upw",
-                                    help="Admin password set කරලා නැත්නම් හිස්ව තියලා Login කරන්න.")
+                                    help="If no admin password is set, leave blank and Login.")
             if st.button("Login", type="primary", key="login_ubtn"):
                 if pw and entered != pw:
-                    st.error("Password වැරදියි.")
+                    st.error("Incorrect password.")
                 else:
                     ss.role, ss.uid, ss.uname = "user", uid, uname
                     st.rerun()
@@ -269,9 +269,9 @@ def _login_screen():
                 ss.role, ss.uid, ss.uname = "admin", "ADMIN", "Administrator"
                 st.rerun()
             elif not _admin_pin:
-                st.warning("secrets.toml එකේ [app] admin_pin එකක් දාන්න.")
+                st.warning("Add an [app] admin_pin in secrets.toml.")
             else:
-                st.error("PIN වැරදියි.")
+                st.error("Incorrect PIN.")
 
 
 if ss.role is None:
@@ -325,29 +325,29 @@ st.sidebar.markdown(
 if page == "⚙️ Setup":
     st.header("⚙️ Setup — Google Sheet Auto-Create")
     st.write(
-        "පහත button එක click කළාම schema එකේ තියෙන **හැම tab එකක්ම Google Sheet "
-        "එකේ auto-create** වෙනවා, headers දැම්මෙයි, master sheets වලට "
+        "Click the button below and **every tab in the schema is created in the Google Sheet "
+        "are **auto-created**, headers added, and master sheets "
         "(USER-M, TCODE-M, SITE-M, CUSTOMMER-M, TIME-M, LOCATION-M) "
-        "මුල් Excel එකේ data seed වෙනවා."
+        "seeds data from the original Excel."
     )
 
     col1, col2 = st.columns(2)
-    seed = col1.checkbox("Masters seed කරන්න (T-codes, Users, Sites…)", value=True)
+    seed = col1.checkbox("Seed masters (T-codes, Users, Sites…)", value=True)
     if col2.button("🚀 Sheets Auto-Create / Sync", type="primary"):
-        with st.spinner("Sheets හදනවා…"):
+        with st.spinner("Creating sheets…"):
             created = gsheets.ensure_all(seed_masters=seed)
         if created:
-            st.success(f"අලුතෙන් හදපු sheets: {', '.join(created)}")
+            st.success(f"Newly created sheets: {', '.join(created)}")
         else:
-            st.info("සියලුම sheets දැනටමත් තියෙනවා ✅")
+            st.info("All sheets already exist ✅")
         st.cache_data.clear()
 
     st.divider()
-    st.subheader("📋 වර්තමාන තත්ත්වය")
+    st.subheader("📋 Current status")
     try:
         st.dataframe(gsheets.sheet_status(), use_container_width=True, hide_index=True)
     except Exception as e:
-        st.warning("Status බලන්න කලින් sheets create කරන්න.")
+        st.warning("Create sheets before checking status.")
         st.caption(str(e))
 
 
@@ -358,7 +358,7 @@ elif page == "🏠 Dashboard":
         txn = scope_df(gsheets.get_df("TRANSACTION"))
         att = scope_df(gsheets.get_df("ATTANDANCE"))
     except Exception:
-        st.info("මුලින් Setup එකෙන් sheets create කරන්න.")
+        st.info("Create sheets from Setup first.")
         st.stop()
 
     # computed totals (TOTAL REVANUE column එකක් save කරන්නේ නෑ — මෙතන ගණනය)
@@ -398,7 +398,7 @@ elif page == "🏠 Dashboard":
     if _total:
         with st.expander(f"🔍 Audit — Rule Violations ({_total}) · {calc.fmt_date(_ms)}–{calc.fmt_date(_t)}",
                          expanded=True):
-            st.caption("මාසේ 1 සිට අද දක්වා — විස්තර 🔍 Audit page එකේ.")
+            st.caption("1st of month to today — details in the 🔍 Audit page.")
             _bc = st.columns(len(_counts))
             for _i, (_k, _n) in enumerate(_counts.items()):
                 _bc[_i].metric(_k, _n)
@@ -407,18 +407,18 @@ elif page == "🏠 Dashboard":
                     st.markdown(f"**{_k}** ({len(_v)})")
                     st.dataframe(style_flag(_v.head(20)), use_container_width=True, hide_index=True)
     else:
-        st.success("🔍 Audit — Rule Violations නෑ ✅ (මාසේ 1 → අද)")
+        st.success("🔍 Audit — No Rule Violations ✅ (1st → today)")
 
     st.divider()
     st.subheader("📅 Monthly — User level (OT / Revenue / Cost / Incentive)")
     summ_all = calc.monthly_user_summary(txn, att)
     if summ_all.empty:
-        st.info("තවම data නෑ. 📝 Transaction / 🕐 Attendance වලින් දාන්න.")
+        st.info("No data yet. Add via 📝 Transaction / 🕐 Attendance.")
     else:
         months = sorted(summ_all["MONTH"].unique(), reverse=True)
         cur = dt.date.today().strftime("%Y-%m")
         idx = months.index(cur) if cur in months else 0   # current month default
-        msel = st.selectbox("මාසය", months, index=idx)
+        msel = st.selectbox("Month", months, index=idx)
         summ = summ_all[summ_all["MONTH"] == msel].drop(columns=["MONTH"])
 
         m1, m2, m3, m4 = st.columns(4)
@@ -438,16 +438,16 @@ elif page == "🏠 Dashboard":
 elif page == "🎛️ Meters":
     st.header("🎛️ Analog Meters")
     if not IS_ADMIN:
-        st.warning("Admin ලට පමණයි.")
+        st.warning("Admins only.")
         st.stop()
     this_month = dt.date.today().strftime("%Y-%m")
-    st.caption(f"Company-wide · {this_month} · හැම user කෙනෙක්ටම")
+    st.caption(f"Company-wide · {this_month} · for everyone")
     full_txn = gsheets.get_df("TRANSACTION")   # unscoped: company-wide
 
     st.subheader("🏢 SITE level — Transaction Volume")
     sv = calc.site_volume_month(full_txn, this_month)
     if sv.empty:
-        st.info("මේ මාසෙට transactions නෑ.")
+        st.info("No transactions this month.")
     elif HAS_PLOTLY:
         mx = float(sv["VOLUME"].max())
         cols = st.columns(min(len(sv), 4))
@@ -459,10 +459,10 @@ elif page == "🎛️ Meters":
         st.bar_chart(sv.set_index("SITE")["VOLUME"], color="#4da3ff")
 
     st.divider()
-    st.subheader("🏆 වැඩිම Transaction කරපු Top 5")
+    st.subheader("🏆 Top 5 by Transactions")
     top5 = calc.top_users_volume(full_txn, this_month, 5)
     if top5.empty:
-        st.info("මේ මාසෙට data නෑ.")
+        st.info("No data this month.")
     elif HAS_PLOTLY:
         mx = float(top5["VOLUME"].max())
         medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
@@ -477,10 +477,10 @@ elif page == "🎛️ Meters":
         st.bar_chart(top5.set_index("USER")["VOLUME"], color="#ffb454")
 
     st.divider()
-    st.subheader("💰 වැඩිම Revenue කරපු Top 5")
+    st.subheader("💰 Top 5 by Revenue")
     topr = calc.top_users_revenue(full_txn, this_month, 5)
     if topr.empty:
-        st.info("මේ මාසෙට data නෑ.")
+        st.info("No data this month.")
     elif HAS_PLOTLY:
         mx = float(topr["REVENUE"].max())
         medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
@@ -500,7 +500,7 @@ elif page == "📝 Transaction":
     st.header("📝 Transaction Entry")
     tdf = _tcodes()
     if tdf.empty:
-        st.warning("TCODE-M හිස්. Setup එකෙන් seed කරන්න.")
+        st.warning("TCODE-M is empty. Seed it from Setup.")
         st.stop()
     lut = calc.build_tcode_lookup(tdf)
 
@@ -542,8 +542,33 @@ elif page == "📝 Transaction":
         st.cache_data.clear()
 
     st.divider()
-    st.subheader("📄 මෑත transactions")
-    df_show(gsheets.get_df("TRANSACTION"))
+    st.subheader("📊 Transaction Summary")
+    _tx = scope_df(gsheets.get_df("TRANSACTION"))
+    _tt = dt.date.today()
+    _tx = calc.filter_by_range(_tx, schema.T_DATE, _tt.replace(day=1), _tt)
+    if _tx.empty:
+        st.info("No transactions this month.")
+    else:
+        _rev = sum(_tx[c].apply(calc._f).sum() for c in
+                   (schema.T_REV_N, schema.T_REV_OTN, schema.T_REV_OTD) if c in _tx)
+        _inc = _tx[schema.T_INCENTIVE].apply(calc._f).sum() if schema.T_INCENTIVE in _tx else 0
+        _qty = _tx[schema.T_QTY].apply(calc._f).sum() if schema.T_QTY in _tx else 0
+        s1, s2, s3, s4 = st.columns(4)
+        s1.metric("Transactions", f"{len(_tx):,}")
+        s2.metric("Total Volume", f"{_qty:,.0f}")
+        s3.metric("Total Revenue", f"{_rev:,.2f}")
+        s4.metric("Incentive", f"{_inc:,.2f}")
+        st.caption(f"This month ({calc.fmt_date(_tt.replace(day=1))} – {calc.fmt_date(_tt)})")
+
+        # by TIME (Normal/OT-N/OT-D)
+        if schema.T_TIME in _tx:
+            _g = _tx.copy()
+            _g["_rev"] = sum(_g[c].apply(calc._f) for c in
+                             (schema.T_REV_N, schema.T_REV_OTN, schema.T_REV_OTD) if c in _g)
+            _by = _g.groupby(_g[schema.T_TIME].astype(str)).agg(
+                Transactions=(schema.T_TIME, "size"), Revenue=("_rev", "sum")).reset_index()
+            _by.columns = ["TIME", "Transactions", "Revenue"]
+            st.dataframe(_by, use_container_width=True, hide_index=True)
 
 
 # ═══════════════════════════ ATTENDANCE ═══════════════════════════
@@ -578,7 +603,7 @@ elif page == "🕐 Attendance":
                    dept, subdept, "", "", 0, "LEAVE", "", 0, 0, "", "", "", 0, 0,
                    date_v.strftime("%a").upper(), rmk, "", sched, schema.APPR_OK, "Leave"]
             added, updated = gsheets.upsert_rows("ATTANDANCE", [row], "UNIC CODE")
-            st.success(f"🌴 Leave {'update' if updated else 'add'} කලා ✅ — {leave_type} ({calc.fmt_date(date_v)})")
+            st.success(f"🌴 Leave {'updated' if updated else 'added'} ✅ — {leave_type} ({calc.fmt_date(date_v)})")
             st.cache_data.clear()
 
     else:
@@ -612,9 +637,9 @@ elif page == "🕐 Attendance":
 
         needs_appr, reason = calc.attendance_needs_approval(wh, date_v, holidays)
         if needs_appr:
-            st.warning(f"⚠️ Approval ඕනේ: {reason}. "
-                       + ("Admin නිසා approve වෙයි." if IS_ADMIN
-                          else "PENDING විදිහට save වෙයි."))
+            st.warning(f"⚠️ Needs approval: {reason}. "
+                       + ("Will be approved as admin." if IS_ADMIN
+                          else "Will be saved as PENDING."))
         submitted = st.button("➕ Add Attendance", type="primary")
 
         if submitted and uid:
@@ -647,14 +672,41 @@ elif page == "🕐 Attendance":
             added, updated = gsheets.upsert_rows("ATTANDANCE", [row], "UNIC CODE")
             _verb = "Updated" if updated else "Added"
             if status == schema.APPR_PENDING:
-                st.warning(f"PENDING විදිහට {_verb.lower()} කළා ⏳ ({reason})")
+                st.warning(f"{_verb} as PENDING ⏳ ({reason})")
             else:
                 st.success(f"{_verb} ✅  Working {wh:.2f}h · OT {ot:.2f}h · Util {util:.1%}"
-                           + (" (පැරණි row එක update කළා)" if updated else ""))
+                           + (" (updated existing row)" if updated else ""))
             st.cache_data.clear()
 
     st.divider()
-    df_show(gsheets.get_df("ATTANDANCE"))
+    st.subheader("📊 Attendance Summary")
+    _at = scope_df(gsheets.get_df("ATTANDANCE"))
+    _t = dt.date.today()
+    _at = calc.filter_by_range(_at, schema.A_DATE, _t.replace(day=1), _t)
+    if _at.empty:
+        st.info("No attendance this month.")
+    else:
+        _wh = _at["# OF WORKING HRS"].apply(calc._f).sum() if "# OF WORKING HRS" in _at else 0
+        _ot = _at["# OF OT HRS"].apply(calc._f).sum() if "# OF OT HRS" in _at else 0
+        _leave = int((_at.get("WORCK LOCATION", pd.Series(dtype=str)).astype(str).str.upper() == "LEAVE").sum())
+        _pend = int((_at.get("APPROVAL STATUS", pd.Series(dtype=str)).astype(str).str.upper() == schema.APPR_PENDING).sum())
+        s1, s2, s3, s4 = st.columns(4)
+        s1.metric("Records", f"{len(_at):,}")
+        s2.metric("Working Hrs", f"{_wh:,.1f}")
+        s3.metric("OT Hrs", f"{_ot:,.1f}")
+        s4.metric("Pending", f"{_pend}")
+        st.caption(f"This month ({calc.fmt_date(_t.replace(day=1))} – {calc.fmt_date(_t)}) · "
+                   f"Leave days: {_leave}")
+
+        # per-user working/OT summary
+        if "USER ID" in _at:
+            _g = _at.copy()
+            _g["_w"] = _g["# OF WORKING HRS"].apply(calc._f)
+            _g["_o"] = _g["# OF OT HRS"].apply(calc._f)
+            _by = _g.groupby(["USER ID", "USER NAME"]).agg(
+                Days=("USER ID", "size"), Working=("_w", "sum"), OT=("_o", "sum")
+            ).reset_index().sort_values("OT", ascending=False)
+            st.dataframe(_by, use_container_width=True, hide_index=True)
 
 
 # ═══════════════════════════ OT APPROVAL ═══════════════════════════
@@ -764,7 +816,7 @@ elif page == "💰 Incentive":
             dt.date.today().strftime("%Y-%m"),
         )
         if inc.empty:
-            st.info("තවම incentive data නෑ.")
+            st.info("No incentive data yet.")
         else:
             row = inc.iloc[0]
             c1, c2, c3 = st.columns(3)
@@ -775,7 +827,7 @@ elif page == "💰 Incentive":
     else:
         period = st.text_input("PERIOD label", dt.date.today().strftime("%Y-%m"))
         if st.button("🧮 Calculate Incentive", type="primary"):
-            with st.spinner("ගණනය කරනවා…"):
+            with st.spinner("Calculating…"):
                 inc = calc.compute_incentive(
                     gsheets.get_df("TRANSACTION"),
                     gsheets.get_df("CUSTOMMER COMPLAINT"),
@@ -792,9 +844,9 @@ elif page == "💰 Incentive":
             c1.metric("Total Incentive Payout", f'{inc["TOTAL INSENTIVE"].apply(calc._f).sum():,.0f}')
             c2.metric("Total Complaint Penalty", f'{inc["COMPLAINT PENALTY"].apply(calc._f).sum():,.0f}')
             c3.metric("Employees", len(inc))
-            if st.button("💾 INSENTIVE sheet එකට save කරන්න"):
+            if st.button("💾 Save to INSENTIVE sheet"):
                 gsheets.overwrite("INSENTIVE", inc)
-                st.success("INSENTIVE sheet update කළා ✅")
+                st.success("INSENTIVE sheet updated ✅")
                 st.cache_data.clear()
 
 
@@ -802,16 +854,16 @@ elif page == "💰 Incentive":
 elif page == "💵 Cost/Revenue":
     st.header("💵 Cost & Revenue — User-wise")
     if not IS_ADMIN:
-        st.warning("Admin ලට පමණයි.")
+        st.warning("Admins only.")
         st.stop()
     st.caption("Cost = Basic + OT(N/D) + Fixed Incentive + EPF(12%) + ETF(3%) + Contractor Fee · "
                "Revenue = transactions · Margin = Revenue − Cost. "
-               "Salary data 🗂️ Data Manager → SALARY-M එකෙන් දාන්න (BASIC SALARY විතරක් ඇති — OT rates auto).")
+               "Enter salary data via 🗂️ Data Manager → SALARY-M (BASIC SALARY is enough — OT rates auto).")
 
     months_default = dt.date.today().strftime("%Y-%m")
     month = st.text_input("Month (YYYY-MM)", months_default)
 
-    if st.button("🧮 Report generate කරන්න", type="primary"):
+    if st.button("🧮 Generate report", type="primary"):
         rep = calc.cost_revenue_report(
             gsheets.get_df("ATTANDANCE"), gsheets.get_df("TRANSACTION"),
             gsheets.get_df("SALARY-M"), gsheets.get_df("USER-M"),
@@ -822,7 +874,7 @@ elif page == "💵 Cost/Revenue":
     if "cr_rep" in st.session_state:
         rep = st.session_state["cr_rep"]
         if rep.empty:
-            st.info("මේ මාසෙට data නෑ.")
+            st.info("No data this month.")
         else:
             tot_cost = rep["COST TO COMPANY"].apply(calc._f).sum()
             tot_rev = rep["TOTAL REVENUE"].apply(calc._f).sum()
@@ -864,7 +916,7 @@ elif page == "💵 Cost/Revenue":
 elif page == "🕒 OT Report":
     st.header("🕒 User-wise Total OT Report")
     if not IS_ADMIN:
-        st.warning("Admin ලට පමණයි.")
+        st.warning("Admins only.")
         st.stop()
     _today = dt.date.today()
     _mstart = _today.replace(day=1)
@@ -872,11 +924,11 @@ elif page == "🕒 OT Report":
     d_from = c1.date_input("From", _mstart, key="otr_from")
     d_to = c2.date_input("To", _today, key="otr_to")
     st.caption(f"{calc.fmt_date(d_from)} – {calc.fmt_date(d_to)} · "
-               "OT-N = normal දවස් OT · OT-D = නිවාඩු/ඉරිදා වැඩ")
+               "OT-N = normal-day OT · OT-D = holiday/Sunday work")
 
     rep = calc.ot_report(gsheets.get_df("ATTANDANCE"), _holidays_set(), d_from, d_to)
     if rep.empty:
-        st.info("මේ range එකට OT data නෑ.")
+        st.info("No OT data for this range.")
     else:
         t1, t2, t3 = st.columns(3)
         t1.metric("Total OT Hrs", f'{rep["TOTAL OT HRS"].sum():,.1f}')
@@ -889,7 +941,7 @@ elif page == "🕒 OT Report":
             bg = "#3a1d1d" if over else "transparent"
             return [f"background-color:{bg};color:#e8eaed"] * len(row)
         st.dataframe(rep.style.apply(_c, axis=1), use_container_width=True, hide_index=True)
-        st.caption(f"🔴 රතු = මාසික OT cap ({schema.MONTHLY_OT_CAP}h) ඉක්මවලා.")
+        st.caption(f"🔴 Red = exceeded monthly OT cap ({schema.MONTHLY_OT_CAP}h).")
 
         st.bar_chart(rep.set_index("USER NAME")["TOTAL OT HRS"], color="#ffb454")
 
@@ -904,14 +956,14 @@ elif page == "🕒 OT Report":
 
 # ═══════════════════════════ AUDIT ═══════════════════════════
 elif page == "🔍 Audit":
-    _scope_lbl = "" if IS_ADMIN else (" (ඔයාගේ team)" if IS_LEADER else " (ඔයාගේ)")
+    _scope_lbl = "" if IS_ADMIN else (" (your team)" if IS_LEADER else " (yours)")
     st.header("🔍 Audit — Rule Violations" + _scope_lbl)
     try:
         att = scope_df(gsheets.get_df("ATTANDANCE"))   # leader -> team scope
         txn = scope_df(gsheets.get_df("TRANSACTION"))
         users = scope_df(_users())
     except Exception:
-        st.info("මුලින් Setup එකෙන් sheets create කරන්න.")
+        st.info("Create sheets from Setup first.")
         st.stop()
     holidays = _holidays_set()
 
@@ -921,7 +973,7 @@ elif page == "🔍 Audit":
     cf1, cf2 = st.columns(2)
     d_from = cf1.date_input("From", _mstart, key="audit_from")
     d_to = cf2.date_input("To", _today, key="audit_to")
-    st.caption(f"Rule violations check කරන්නේ **{calc.fmt_date(d_from)} – {calc.fmt_date(d_to)}** range එකට.")
+    st.caption(f"Rule violations are checked for **{calc.fmt_date(d_from)} – {calc.fmt_date(d_to)}**.")
     att = calc.filter_by_range(att, schema.A_DATE, d_from, d_to)
     txn = calc.filter_by_range(txn, schema.T_DATE, d_from, d_to)
 
@@ -932,45 +984,45 @@ elif page == "🔍 Audit":
 
     # 1) Working hours > 20 without approval
     with tabs[0]:
-        st.caption(f"# OF WORKING HRS > {schema.WORKING_HRS_CAP}, approve කරලා නැති rows.")
+        st.caption(f"# OF WORKING HRS > {schema.WORKING_HRS_CAP}, not yet approved.")
         d1 = calc.audit_working_hours_cap(att)
         if d1.empty:
-            st.success("✅ Violations නෑ.")
+            st.success("✅ No violations.")
         else:
-            st.error(f"⚠️ {len(d1)} rows — admin approval ඕනේ.")
+            st.error(f"⚠️ {len(d1)} rows — need admin approval.")
             st.dataframe(style_flag(d1), use_container_width=True, hide_index=True)
 
     # 2) Holiday / Sunday attendance
     with tabs[1]:
-        st.caption("ඉරිදා / admin නිවාඩු දවස් වලට attendance (approve කරලා නැති).")
+        st.caption("Attendance on Sundays / admin holidays (not approved).")
         d2 = calc.audit_holiday_attendance(att, holidays)
         if d2.empty:
-            st.success("✅ Violations නෑ.")
+            st.success("✅ No violations.")
         else:
             st.error(f"⚠️ {len(d2)} rows.")
             st.dataframe(style_flag(d2, "#ffe9c7"), use_container_width=True, hide_index=True)
             if IS_ADMIN and "UNIC CODE" in d2.columns:
-                st.markdown("**🟢 OFF mark කරලා clear කරන්න (admin)**")
+                st.markdown("**🟢 Mark OFF and clear (admin)**")
                 _o2 = {f'{r["UNIC CODE"]} — {calc.fmt_date(r.get("DATE"))} · {r.get("USER NAME","")}': str(r["UNIC CODE"]).strip()
                        for _, r in d2.iterrows()}
                 _s2 = st.multiselect("Rows", list(_o2), key="hol_clear_sel")
                 _n2 = st.text_input("Remark", "OFF day approved", key="hol_clear_note")
                 if st.button("🟢 OFF mark · Clear", type="primary", key="hol_clear_btn"):
                     if not _s2:
-                        st.warning("Rows තෝරන්න.")
+                        st.warning("Select rows.")
                     else:
                         n = _clear_audit_rows([_o2[s] for s in _s2], schema.APPR_OFF, _n2 or "OFF")
-                        st.success(f"{n} rows OFF mark කරලා clear කළා ✅")
+                        st.success(f"{n} rows marked OFF and cleared ✅")
                         st.cache_data.clear()
                         st.rerun()
 
     # 3) OT worked but no OT transaction
     with tabs[2]:
-        st.caption("Scheduled time එකට වඩා වැඩ කරලා, ඒ දවසට OT-N/OT-D transaction "
-                   "(එක line එකක් හරි) නැති.")
+        st.caption("Worked beyond scheduled time, but no OT-N/OT-D transaction that day "
+                   "(not even one line).")
         d3 = calc.audit_ot_without_transaction(att, txn, holidays)
         if d3.empty:
-            st.success("✅ හැම OT එකකටම transaction තියෙනවා.")
+            st.success("✅ Every OT has a transaction.")
         else:
             st.error(f"⚠️ {len(d3)} rows — OT transaction missing.")
             cols = [c for c in ["DATE", "USER ID", "USER NAME", "# OF WORKING HRS",
@@ -978,60 +1030,60 @@ elif page == "🔍 Audit":
                     if c in d3.columns]
             st.dataframe(style_flag(d3[cols]), use_container_width=True, hide_index=True)
             if IS_ADMIN and "UNIC CODE" in d3.columns:
-                st.markdown("**📝 Remark එක්ක clear කරන්න (admin approval)**")
+                st.markdown("**📝 Clear with remark (admin approval)**")
                 _o3 = {f'{r["UNIC CODE"]} — {calc.fmt_date(r.get("DATE"))} · {r.get("USER NAME","")} · OT {calc._f(r.get("# OF OT HRS")):.1f}h': str(r["UNIC CODE"]).strip()
                        for _, r in d3.iterrows()}
                 _s3 = st.multiselect("Rows", list(_o3), key="ot_clear_sel")
-                _n3 = st.text_input("Remark (අනිවාර්යයි)", "", key="ot_clear_note",
-                                    placeholder="උදා: manual OT approved by manager")
+                _n3 = st.text_input("Remark (required)", "", key="ot_clear_note",
+                                    placeholder="e.g. manual OT approved by manager")
                 if st.button("✅ Clear (OT justified)", type="primary", key="ot_clear_btn"):
                     if not _s3:
-                        st.warning("Rows තෝරන්න.")
+                        st.warning("Select rows.")
                     elif not _n3.strip():
-                        st.warning("Remark එකක් අනිවාර්යයි.")
+                        st.warning("A remark is required.")
                     else:
                         n = _clear_audit_rows([_o3[s] for s in _s3],
                                               schema.APPR_OT_CLEARED, _n3.strip())
-                        st.success(f"{n} rows clear කළා ✅ (remark සමඟ)")
+                        st.success(f"{n} rows cleared ✅ (with remark)")
                         st.cache_data.clear()
                         st.rerun()
 
     # 4) Weekly OT > 15
     with tabs[3]:
-        st.caption(f"සතියකට # OF OT HRS > {schema.WEEKLY_OT_CAP}.")
+        st.caption(f"Weekly # OF OT HRS > {schema.WEEKLY_OT_CAP}.")
         d4 = calc.audit_weekly_ot(att)
         if d4.empty:
-            st.success("✅ සතියේ OT cap එක ඉක්මවලා නෑ.")
+            st.success("✅ Weekly OT cap not exceeded.")
         else:
             st.error(f"⚠️ {len(d4)} user-weeks.")
             st.dataframe(style_flag(d4, "#ffd6d6"), use_container_width=True, hide_index=True)
 
     # 5) Monthly OT > 60
     with tabs[4]:
-        st.caption(f"මාසෙකට # OF OT HRS > {schema.MONTHLY_OT_CAP}.")
+        st.caption(f"Monthly # OF OT HRS > {schema.MONTHLY_OT_CAP}.")
         d6 = calc.audit_monthly_ot(att)
         if d6.empty:
-            st.success("✅ මාසික OT cap එක ඉක්මවලා නෑ.")
+            st.success("✅ Monthly OT cap not exceeded.")
         else:
-            st.error(f"⚠️ {len(d6)} user-months — මාසික OT 60+ ඉක්මවලා.")
+            st.error(f"⚠️ {len(d6)} user-months — exceeded monthly OT 60+.")
             st.dataframe(style_flag(d6, "#ffccd5"), use_container_width=True, hide_index=True)
 
     # 6) Missing transactions for a date
     with tabs[5]:
-        adate = st.date_input("දිනය", dt.date.today(), key="audit_missing_date")
+        adate = st.date_input("Date", dt.date.today(), key="audit_missing_date")
         d5 = calc.audit_missing_transactions(users, txn, adate)
         if d5.empty:
-            st.success("✅ හැම active user කෙනෙක්ම transaction දාලා.")
+            st.success("✅ Every active user has transactions.")
         else:
-            st.error(f"⚠️ {len(d5)} users — {adate.isoformat()} දිනට transaction නෑ.")
+            st.error(f"⚠️ {len(d5)} users — no transaction on {adate.isoformat()}.")
             st.dataframe(style_flag(d5, "#e0e0ff"), use_container_width=True, hide_index=True)
 
 
 # ═══════════════════════════ EXPORT ═══════════════════════════
 elif page == "📥 Export":
     st.header("📥 Export — ATTANDANCE / TRANSACTION")
-    st.caption("Date range + user අනුව filter කරලා Excel/CSV download කරන්න. "
-               "Format එක මුල් Excel එකේ විදිහටමයි.")
+    st.caption("Filter by date range + user and download Excel/CSV. "
+               "Format matches the original Excel.")
 
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -1044,7 +1096,7 @@ elif page == "📥 Export":
 
     # user level filter
     udf = _users()
-    user_map = {"ALL — සියලුම users": "ALL"}
+    user_map = {"ALL — all users": "ALL"}
     if not udf.empty:
         for _, r in udf.iterrows():
             uid = str(r.get("USER ID", "")).strip()
@@ -1079,7 +1131,7 @@ elif page == "📥 Export":
             for key, df in result.items():
                 df.to_excel(xw, sheet_name=key[:31], index=False)
         st.download_button(
-            "⬇️ Excel (.xlsx) — ඔක්කොම", buf.getvalue(),
+            "⬇️ Excel (.xlsx) — All", buf.getvalue(),
             file_name=f"KPI_export_{d_from}_{d_to}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
@@ -1087,8 +1139,8 @@ elif page == "📥 Export":
 # ═══════════════════════════ UPLOAD ═══════════════════════════
 elif page == "📤 Upload":
     st.header("📤 Bulk Upload — ATTANDANCE / TRANSACTION")
-    st.caption("Excel (.xlsx) හෝ CSV එකකින් data add කරන්න. **Rules check කරලා "
-               "තමයි add කරන්නේ** — violations block / approval වෙයි.")
+    st.caption("Add data from an Excel (.xlsx) or CSV file. **Rules are checked "
+               "are added** — violations are blocked / need approval.")
 
     target = st.selectbox("Sheet", ["TRANSACTION", "ATTANDANCE"])
     headers = schema.SHEETS[target]["headers"]
@@ -1099,16 +1151,16 @@ elif page == "📤 Upload":
                        tmpl.to_csv(index=False).encode("utf-8-sig"),
                        file_name=f"{target}_template.csv", mime="text/csv")
 
-    up = st.file_uploader("File එක", type=["xlsx", "xls", "csv"])
+    up = st.file_uploader("File", type=["xlsx", "xls", "csv"])
     if up is not None:
         try:
             raw = pd.read_csv(up, dtype=str) if up.name.lower().endswith("csv") \
                 else pd.read_excel(up, dtype=str)
         except Exception as e:
-            st.error(f"File කියවන්න බෑ: {e}")
+            st.error(f"Cannot read file: {e}")
             st.stop()
         raw = raw.fillna("")
-        st.write(f"කියෙව්වා: {len(raw)} rows")
+        st.write(f"Read: {len(raw)} rows")
 
         # Scope: normal user -> තමන්, leader -> team, admin -> ඕනෑම
         if not IS_ADMIN and ALLOWED_UIDS is not None:
@@ -1119,12 +1171,12 @@ elif page == "📤 Upload":
                     lambda x: CURRENT_UID if not str(x).strip() else str(x).strip())
             other = raw[~raw["USER ID"].isin(ALLOWED_UIDS)]
             if len(other):
-                st.warning(f"⚠️ ඔයාට අදාළ නොවන USER ID rows {len(other)}ක් skip කරනවා — "
-                           + ("team එකේ users ට විතරක් upload කරන්න පුළුවන්."
-                              if IS_LEADER else "තමන්ගේ data විතරක් upload කරන්න පුළුවන්."))
+                st.warning(f"⚠️ Skipping {len(other)} rows with USER IDs outside your scope — "
+                           + ("you can only upload for users in your team."
+                              if IS_LEADER else "you can only upload your own data."))
             raw = raw[raw["USER ID"].isin(ALLOWED_UIDS)]
             if raw.empty:
-                st.info("Upload කරන්න rows නෑ.")
+                st.info("No rows to upload.")
                 st.stop()
 
         # ─────────────── TRANSACTION ───────────────
@@ -1162,16 +1214,16 @@ elif page == "📤 Upload":
             c2.metric("🚫 Error rows (block)", n_err)
 
             if n_err:
-                st.error("පහත rows වල rule/validation errors — මේවා add වෙන්නේ නෑ:")
+                st.error("Rule/validation errors in the rows below — these are not added:")
                 st.dataframe(style_flag(disp[errmask]), use_container_width=True, hide_index=True)
 
             clean = save_df[~errmask]
-            st.subheader(f"Add වෙන {len(clean)} rows (preview)")
+            st.subheader(f"{len(clean)} rows to add (preview)")
             st.dataframe(clean.head(50), use_container_width=True, hide_index=True)
 
-            if len(clean) and st.button(f"⬆️ {len(clean)} clean rows add කරන්න", type="primary"):
+            if len(clean) and st.button(f"⬆️ Add {len(clean)} clean rows", type="primary"):
                 gsheets.append_rows(target, clean.fillna("").astype(str).values.tolist())
-                st.success(f"{len(clean)} rows add කළා ✅ ({n_err} error rows skip කළා)")
+                st.success(f"{len(clean)} rows added ✅ (skipped {n_err} error rows)")
                 st.cache_data.clear()
 
         # ─────────────── ATTANDANCE ───────────────
@@ -1186,11 +1238,11 @@ elif page == "📤 Upload":
             c1, c2, c3 = st.columns(3)
             c1.metric("Total", len(save_df))
             c2.metric("✅ OK", int((~pending_mask).sum()))
-            c3.metric("⏳ Approval ඕනේ", n_pending)
+            c3.metric("⏳ Needs approval", n_pending)
 
             if viol_mask.any():
-                st.warning("⚠️ Rule violations — මේවා **PENDING** විදිහට add වෙයි "
-                           "(Admin → Approvals වලින් approve කරන්න ඕනේ):")
+                st.warning("⚠️ Rule violations — these are added as **PENDING** "
+                           "(needs Admin approval via Approvals):")
                 st.dataframe(
                     style_flag(disp[viol_mask][[
                         "DATE", "USER ID", "# OF WORKING HRS", "SCHEDULED HRS",
@@ -1198,22 +1250,22 @@ elif page == "📤 Upload":
                     use_container_width=True, hide_index=True)
 
             mode = st.radio("Add mode", [
-                "Clean rows විතරක් (violations skip)",
-                "ඔක්කොම add — violations PENDING විදිහට",
+                "Clean rows only (skip violations)",
+                "Add all — violations as PENDING",
             ], index=1)
 
-            to_add = save_df if mode.startswith("ඔක්කොම") else save_df[~pending_mask]
+            to_add = save_df if mode.startswith("All") else save_df[~pending_mask]
 
-            st.info("ℹ️ UNIC CODE එක දැනටමත් තියෙනවා නම් ඒ row එක **update** වෙනවා "
-                    "(duplicate වෙන්නේ නෑ).")
+            st.info("ℹ️ If a UNIC CODE already exists that row is **updated** "
+                    "(no duplicates).")
             st.subheader(f"{len(to_add)} rows (preview)")
             st.dataframe(to_add.head(50), use_container_width=True, hide_index=True)
 
-            if len(to_add) and st.button(f"⬆️ {len(to_add)} rows upsert කරන්න", type="primary"):
+            if len(to_add) and st.button(f"⬆️ Upsert {len(to_add)} rows", type="primary"):
                 added, updated = gsheets.upsert_rows(
                     "ATTANDANCE", to_add.fillna("").astype(str).values.tolist(), "UNIC CODE")
                 st.success(f"✅ {added} add · {updated} update"
-                           + (f" · {n_pending} PENDING" if mode.startswith("ඔක්කොම") and n_pending else ""))
+                           + (f" · {n_pending} PENDING" if mode.startswith("All") and n_pending else ""))
                 st.cache_data.clear()
 
 
@@ -1221,53 +1273,90 @@ elif page == "📤 Upload":
 elif page == "🛡️ Admin":
     st.header("🛡️ Admin")
     if not IS_ADMIN:
-        st.warning("මේ page එක admin ලට පමණයි. Sidebar එකේ 🔑 Admin login එකෙන් PIN දාන්න.")
+        st.warning("This page is admins only. Login with the PIN via 🔑 Admin login in the sidebar.")
         st.stop()
 
-    a1, a2 = st.tabs(["✅ Attendance Approvals", "📅 Holiday Setup"])
+    a1, a2, a3 = st.tabs(["✅ Attendance Approvals", "👥 Bulk Mark", "📅 Holiday Setup"])
 
     # ── Pending attendance approvals ──
     with a1:
         st.subheader("PENDING attendance approvals")
         att = gsheets.get_df("ATTANDANCE")
         if "APPROVAL STATUS" not in att or att.empty:
-            st.info("Attendance data නෑ.")
+            st.info("No attendance data.")
         else:
             pend = att[att["APPROVAL STATUS"].astype(str).str.upper() == schema.APPR_PENDING]
             if pend.empty:
-                st.success("✅ Pending approvals නෑ.")
+                st.success("✅ No pending approvals.")
             else:
                 st.error(f"{len(pend)} pending.")
                 show_cols = [c for c in ["UNIC CODE", "DATE", "USER ID", "USER NAME",
                                          "# OF WORKING HRS", "APPROVAL NOTE"] if c in pend.columns]
                 st.dataframe(pend[show_cols], use_container_width=True, hide_index=True)
 
-                pick = st.selectbox("UNIC CODE තෝරන්න", pend["UNIC CODE"].tolist())
+                _multi = st.checkbox("Approve / reject multiple at once", value=True)
+                if _multi:
+                    picks = st.multiselect("Select UNIC CODEs", pend["UNIC CODE"].tolist())
+                else:
+                    picks = [st.selectbox("Select UNIC CODE", pend["UNIC CODE"].tolist())]
                 c1, c2 = st.columns(2)
                 if c1.button("✅ Approve", type="primary"):
-                    att.loc[att["UNIC CODE"] == pick, "APPROVAL STATUS"] = schema.APPR_APPROVED
+                    att.loc[att["UNIC CODE"].isin(picks), "APPROVAL STATUS"] = schema.APPR_APPROVED
                     gsheets.overwrite("ATTANDANCE", att)
-                    st.success(f"{pick} approved ✅")
+                    st.success(f"{len(picks)} approved ✅")
                     st.cache_data.clear()
                     st.rerun()
                 if c2.button("❌ Reject"):
-                    att.loc[att["UNIC CODE"] == pick, "APPROVAL STATUS"] = schema.APPR_REJECTED
+                    att.loc[att["UNIC CODE"].isin(picks), "APPROVAL STATUS"] = schema.APPR_REJECTED
                     gsheets.overwrite("ATTANDANCE", att)
-                    st.warning(f"{pick} rejected")
+                    st.warning(f"{len(picks)} rejected")
                     st.cache_data.clear()
                     st.rerun()
 
-    # ── Holiday setup ──
+    # ── Bulk attendance mark for all users ──
     with a2:
-        st.subheader("නිවාඩු දවස් setup")
-        st.caption("මෙතන දාන දවස් වලට scheduled hours = 0. ඒ දවස් වලට attendance "
-                   "දාන්න admin approval ඕනේ වෙයි.")
+        st.subheader("Bulk attendance mark — all USER-M users")
+        st.caption("Default times: Weekday 8:00–17:00 (lunch 1h) · Saturday 8:00–13:00 · "
+                   "Sunday 8:00–13:00. Rest-day (Sunday/holiday) rows need admin approval.")
+        udf = _users()
+        active = udf[udf["ACTIVE"].astype(str).str.upper() != "N"] if "ACTIVE" in udf else udf
+        b1, b2 = st.columns(2)
+        bfrom = b1.date_input("From", dt.date.today(), key="bulk_from")
+        bto = b2.date_input("To", dt.date.today(), key="bulk_to")
+        b3, b4 = st.columns(2)
+        bloc = b3.text_input("Work location", "EGF", key="bulk_loc")
+        approve_rest = b4.checkbox("Auto-approve rest-day rows (admin)", value=False,
+                                   help="On = Sunday/holiday rows APPROVED · Off = PENDING")
+        ndays = (bto - bfrom).days + 1
+        st.caption(f"{len(active)} active users × {max(ndays,0)} day(s) = "
+                   f"up to {len(active) * max(ndays,0)} rows")
+
+        if st.button("👥 Generate attendance", type="primary"):
+            dates = calc.date_range_list(bfrom, bto)
+            rows = calc.bulk_attendance_rows(
+                active, dates, _holidays_set(), txn_df=gsheets.get_df("TRANSACTION"),
+                weekday_lunch=1.0, weekend_lunch=0.0, location=bloc or "EGF",
+                admin=approve_rest)
+            if not rows:
+                st.info("No rows generated (no active users / invalid range).")
+            else:
+                added, updated = gsheets.upsert_rows("ATTANDANCE", rows, "UNIC CODE")
+                _pend_n = sum(1 for r in rows if r[22] == schema.APPR_PENDING)
+                st.success(f"✅ {added} added · {updated} updated"
+                           + (f" · {_pend_n} rest-day rows PENDING approval" if _pend_n else ""))
+                st.cache_data.clear()
+
+    # ── Holiday setup ──
+    with a3:
+        st.subheader("Holiday setup")
+        st.caption("Dates added here have scheduled hours = 0. Attendance on those days "
+                   "needs admin approval.")
         hdf = gsheets.get_df("HOLIDAY-M")
 
         # ── calendar date picker එකෙන් add ──
-        st.markdown("**📅 අලුත් නිවාඩුවක් add කරන්න**")
+        st.markdown("**📅 Add a new holiday**")
         h1, h2, h3, h4 = st.columns([2, 3, 2, 1])
-        hdate = h1.date_input("දිනය", dt.date.today(), key="hol_date")
+        hdate = h1.date_input("Date", dt.date.today(), key="hol_date")
         hdesc = h2.text_input("Description", key="hol_desc")
         htype = h3.selectbox("TYPE", ["Public", "Mercantile", "Special", "Bank"],
                              key="hol_type")
@@ -1277,32 +1366,32 @@ elif page == "🛡️ Admin":
             existing_dates = set(hdf["DATE"].apply(lambda x: (calc._to_date(x) or "")
                                  and calc._to_date(x).isoformat()) ) if not hdf.empty and "DATE" in hdf else set()
             if iso in existing_dates:
-                st.warning("ඒ දිනය දැනටමත් තියෙනවා.")
+                st.warning("That date already exists.")
             else:
                 gsheets.append_rows("HOLIDAY-M", [[iso, hdesc, htype]])
-                st.success(f"{iso} නිවාඩුව add කළා ✅")
+                st.success(f"Holiday {iso} added ✅")
                 st.cache_data.clear()
                 st.rerun()
 
         st.divider()
-        st.markdown("**දැනට තියෙන නිවාඩු දවස්** (table එකේ edit / delete කරන්නත් පුළුවන්)")
+        st.markdown("**Existing holidays** (you can edit / delete in the table too)")
         edited = st.data_editor(hdf, num_rows="dynamic", use_container_width=True,
                                 hide_index=True, key="hol_ed")
         if st.button("💾 Holidays save", type="primary"):
             gsheets.overwrite("HOLIDAY-M", edited)
-            st.success("HOLIDAY-M update කළා ✅")
+            st.success("HOLIDAY-M updated ✅")
             st.cache_data.clear()
 
         st.divider()
-        st.caption(f"⚙️ Rules: දවසකට cap {schema.WORKING_HRS_CAP}h · සතියට OT cap "
+        st.caption(f"⚙️ Rules: daily cap {schema.WORKING_HRS_CAP}h · weekly OT cap "
                    f"{schema.WEEKLY_OT_CAP}h · complaint penalty {schema.COMPLAINT_PENALTY} · "
-                   f"schedule (Mon–Fri 8h, Sat 5h, Sun 0h). මේවා schema.py එකේ වෙනස් කරන්න.")
+                   f"schedule (Mon–Fri 8h, Sat 5h, Sun 0h). Change these in schema.py.")
 
 
 # ═══════════════════════════ DATA MANAGER ═══════════════════════════
 elif page == "🗂️ Data Manager":
     st.header("🗂️ Data Manager — Add / Update / Delete"
-              + ("" if IS_ADMIN else (" (ඔයාගේ team)" if IS_LEADER else " (ඔයාගේ)")))
+              + ("" if IS_ADMIN else (" (your team)" if IS_LEADER else " (yours)")))
 
     if IS_ADMIN:
         # Admin -> හැම sheet එකම
@@ -1312,9 +1401,9 @@ elif page == "🗂️ Data Manager":
     else:
         # User/Leader -> තමන්ගේ/team එකේ ATTANDANCE + TRANSACTION විතරක්
         editable = ["ATTANDANCE", "TRANSACTION"]
-        st.caption("ඔයාට ඔයාගේ"
-                   + (" team එකේ" if IS_LEADER else "")
-                   + " ATTANDANCE සහ TRANSACTION records edit/delete කරන්න පුළුවන්.")
+        st.caption("You can manage your"
+                   + (" team's" if IS_LEADER else "")
+                   + " you can edit/delete ATTANDANCE and TRANSACTION records.")
 
     mkey = st.selectbox("Sheet", editable)
     full_df = gsheets.get_df(mkey)
@@ -1325,7 +1414,7 @@ elif page == "🗂️ Data Manager":
     date_col = "Date" if "Date" in full_df.columns else ("DATE" if "DATE" in full_df.columns else None)
     use_dt = False
     if date_col and not view.empty:
-        use_dt = st.checkbox(f"📅 {date_col} එකෙන් filter කරන්න", value=True)
+        use_dt = st.checkbox(f"📅 Filter by {date_col}", value=True)
         if use_dt:
             _t = dt.date.today()
             fc1, fc2 = st.columns(2)
@@ -1334,7 +1423,7 @@ elif page == "🗂️ Data Manager":
             _dmask = view[date_col].apply(
                 lambda x: (lambda d: d is not None and d_from <= d <= d_to)(calc._to_date(x)))
             view = view[_dmask]
-            st.caption(f"{calc.fmt_date(d_from)} – {calc.fmt_date(d_to)} range එකේ {len(view)} records")
+            st.caption(f"{len(view)} records in {calc.fmt_date(d_from)} – {calc.fmt_date(d_to)}")
 
     # optional search filter
     q = st.text_input("🔎 Search (optional)", "")
@@ -1344,8 +1433,8 @@ elif page == "🗂️ Data Manager":
 
     # non-admin නම් හැම විටම partial-save (අනිත් users ගේ rows preserve කරන්න)
     _partial = bool(use_dt or q.strip() or not IS_ADMIN)
-    st.caption(f"{len(view)} records පෙන්නනවා • **cell double-click → edit** · "
-               "**පහළ ➕ row → add** · **🗑️ Delete? tick කරලා → delete** · අන්තිමට 💾 Save.")
+    st.caption(f"showing {len(view)} records • **double-click a cell → edit** · "
+               "**bottom ➕ row → add** · **tick 🗑️ Delete? → delete** · then 💾 Save.")
 
     work = view.copy()
     work.insert(0, "🗑️ Delete?", False)
@@ -1353,15 +1442,15 @@ elif page == "🗂️ Data Manager":
         work, use_container_width=True, num_rows="dynamic",
         hide_index=True, key=f"ed_{mkey}_{q}_{use_dt}",
         column_config={"🗑️ Delete?": st.column_config.CheckboxColumn(
-            "🗑️ Delete?", help="මේ row එක delete කරන්න tick කරන්න", default=False)},
+            "🗑️ Delete?", help="Tick to delete this row", default=False)},
     )
 
     ndel = int(edited["🗑️ Delete?"].fillna(False).sum())
     recalc = False
     if mkey in ("ATTANDANCE", "TRANSACTION"):
         recalc = st.checkbox(
-            "🔄 IN/OUT (හෝ T-CODE/qty) වලින් auto-recalculate කරන්න", value=True,
-            help="ATTANDANCE: working/OT/scheduled · TRANSACTION: SMV/revenue/In නැවත ගණනය")
+            "🔄 Auto-recalculate from IN/OUT (or T-CODE/qty)", value=True,
+            help="ATTANDANCE: working/OT/scheduled · TRANSACTION: recompute SMV/revenue/In")
     c1, c2 = st.columns([1, 4])
     if c1.button(f"💾 Save ({ndel} delete)" if ndel else "💾 Save", type="primary"):
         kept = edited[~edited["🗑️ Delete?"].fillna(False)].drop(columns=["🗑️ Delete?"])
@@ -1372,7 +1461,7 @@ elif page == "🗂️ Data Manager":
                 lambda x: CURRENT_UID if not str(x).strip() else str(x).strip())
             bad = kept[~kept["USER ID"].isin(ALLOWED_UIDS)]
             if len(bad):
-                st.warning(f"⚠️ ඔයාට අදාළ නොවන USER ID rows {len(bad)}ක් skip කරනවා.")
+                st.warning(f"⚠️ Skipping {len(bad)} rows with USER IDs outside your scope.")
             kept = kept[kept["USER ID"].isin(ALLOWED_UIDS)]
 
         if _partial:
@@ -1394,16 +1483,16 @@ elif page == "🗂️ Data Manager":
                 subset="UNIC CODE", keep="last").reset_index(drop=True)
 
         gsheets.overwrite(mkey, final)
-        st.success(f"{mkey} update කළා ✅ — {len(final)} rows ({ndel} deleted)"
+        st.success(f"{mkey} updated ✅ — {len(final)} rows ({ndel} deleted)"
                    + (" · recalculated 🔄" if recalc else ""))
         st.cache_data.clear()
         st.rerun()
-    c2.caption("⚠️ Save කළාම add + edit + delete එකවර apply වෙනවා. "
-               "Filter/scope කරලා save කළත් අනිත් rows safe.")
+    c2.caption("⚠️ Saving applies add + edit + delete together. "
+               "Other rows stay safe even when you save with a filter/scope.")
 
     if mkey == "TCODE-M":
-        st.info("ℹ️ TCODE-M = මුල් Excel එකේ *Master sheet - Finalized* (SMV/rate engine). "
-                "rate column වෙනස් කළාම ඊට පස්සේ එන transactions වලට ඒ අගයම apply වෙනවා.")
+        st.info("ℹ️ TCODE-M = the original Excel *Master sheet - Finalized* (SMV/rate engine). "
+                "changing a rate column applies that value to subsequent transactions.")
 
 
 # ───────────────────────── footer brand (every page) ─────────────────────────

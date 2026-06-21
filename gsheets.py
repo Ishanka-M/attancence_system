@@ -184,9 +184,9 @@ def sheet_status() -> pd.DataFrame:
 
 
 # ───────────────────── read / write helpers ──────────────────────
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=120, show_spinner=False)
 def get_df(sheet_key: str) -> pd.DataFrame:
-    """Worksheet එකක් DataFrame විදිහට කියවනවා (60s cache)."""
+    """Read a worksheet as a DataFrame (120s cache, shared across users)."""
     sh = get_spreadsheet()
     title = schema.SHEETS[sheet_key]["title"]
     try:
