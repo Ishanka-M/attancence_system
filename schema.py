@@ -201,6 +201,8 @@ APPR_OK = "OK"               # rule violation එකක් නෑ
 APPR_PENDING = "PENDING"     # admin approval බලාගෙන
 APPR_APPROVED = "APPROVED"
 APPR_REJECTED = "REJECTED"
+APPR_OFF = "OFF"             # Holiday/Sunday -> off mark කරලා clear කළ
+APPR_OT_CLEARED = "OT-CLEARED"  # OT w/o txn -> admin remark එක්ක clear කළ
 
 MASTER_SHEETS = [k for k, v in SHEETS.items() if v["kind"] == "master"]
 TXN_SHEETS = [k for k, v in SHEETS.items() if v["kind"] == "txn"]

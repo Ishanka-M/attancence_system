@@ -348,8 +348,10 @@ def audit_holiday_attendance(att_df: pd.DataFrame, holidays: set) -> pd.DataFram
         return pd.DataFrame()
     df = att_df.copy()
     df["_rest"] = df["DATE"].apply(lambda d: is_rest_day(d, holidays))
-    status = df.get("APPROVAL STATUS", pd.Series([""] * len(df)))
-    mask = df["_rest"] & (status.astype(str).str.upper() != schema.APPR_APPROVED)
+    status = df.get("APPROVAL STATUS", pd.Series([""] * len(df))).astype(str).str.upper()
+    # APPROVED හෝ OFF mark කරපු rows -> clear (audit එකේ පෙන්නන්නේ නෑ)
+    cleared = status.isin([schema.APPR_APPROVED, schema.APPR_OFF])
+    mask = df["_rest"] & (~cleared)
     return df[mask].drop(columns=["_rest"])
 
 
@@ -376,6 +378,9 @@ def audit_ot_without_transaction(att_df: pd.DataFrame, txn_df: pd.DataFrame,
         ot_h = _f(a.get("# OF OT HRS"))
         # # OF OT HRS = 0 නම් OT නෑ -> flag කරන්නේ නෑ (column එක authoritative)
         if ot_h <= 0:
+            continue
+        # admin remark එක්ක clear කරපු rows -> skip
+        if str(a.get("APPROVAL STATUS", "")).strip().upper() == schema.APPR_OT_CLEARED:
             continue
         d = _to_date(a.get("DATE"))
         key = (str(a.get("USER ID", "")).strip(), d.isoformat() if d else "")

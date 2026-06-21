@@ -146,6 +146,19 @@ def style_flag(df: pd.DataFrame, color="#ffd6d6"):
     return df.style.apply(lambda _: [css] * len(df.columns), axis=1)
 
 
+def _clear_audit_rows(unics, status, note):
+    """අදාළ UNIC CODE rows වල ATTANDANCE APPROVAL STATUS + NOTE update කරලා clear කරනවා."""
+    df = gsheets.get_df("ATTANDANCE")
+    if df.empty or "UNIC CODE" not in df.columns:
+        return 0
+    df = df.astype(object)
+    m = df["UNIC CODE"].astype(str).str.strip().isin([str(u).strip() for u in unics])
+    df.loc[m, "APPROVAL STATUS"] = status
+    df.loc[m, "APPROVAL NOTE"] = note
+    gsheets.overwrite("ATTANDANCE", df)
+    return int(m.sum())
+
+
 def gauge(value, max_value, title, color="#4da3ff", suffix=""):
     """Analog meter (gauge) — dark theme. st.plotly_chart වලින් render කරන්න."""
     mx = max_value if max_value and max_value > 0 else 1
@@ -936,6 +949,20 @@ elif page == "🔍 Audit":
         else:
             st.error(f"⚠️ {len(d2)} rows.")
             st.dataframe(style_flag(d2, "#ffe9c7"), use_container_width=True, hide_index=True)
+            if IS_ADMIN and "UNIC CODE" in d2.columns:
+                st.markdown("**🟢 OFF mark කරලා clear කරන්න (admin)**")
+                _o2 = {f'{r["UNIC CODE"]} — {calc.fmt_date(r.get("DATE"))} · {r.get("USER NAME","")}': str(r["UNIC CODE"]).strip()
+                       for _, r in d2.iterrows()}
+                _s2 = st.multiselect("Rows", list(_o2), key="hol_clear_sel")
+                _n2 = st.text_input("Remark", "OFF day approved", key="hol_clear_note")
+                if st.button("🟢 OFF mark · Clear", type="primary", key="hol_clear_btn"):
+                    if not _s2:
+                        st.warning("Rows තෝරන්න.")
+                    else:
+                        n = _clear_audit_rows([_o2[s] for s in _s2], schema.APPR_OFF, _n2 or "OFF")
+                        st.success(f"{n} rows OFF mark කරලා clear කළා ✅")
+                        st.cache_data.clear()
+                        st.rerun()
 
     # 3) OT worked but no OT transaction
     with tabs[2]:
@@ -950,6 +977,24 @@ elif page == "🔍 Audit":
                                 "SCHEDULED HRS", "# OF OT HRS", "EXTRA HRS", "ISSUE"]
                     if c in d3.columns]
             st.dataframe(style_flag(d3[cols]), use_container_width=True, hide_index=True)
+            if IS_ADMIN and "UNIC CODE" in d3.columns:
+                st.markdown("**📝 Remark එක්ක clear කරන්න (admin approval)**")
+                _o3 = {f'{r["UNIC CODE"]} — {calc.fmt_date(r.get("DATE"))} · {r.get("USER NAME","")} · OT {calc._f(r.get("# OF OT HRS")):.1f}h': str(r["UNIC CODE"]).strip()
+                       for _, r in d3.iterrows()}
+                _s3 = st.multiselect("Rows", list(_o3), key="ot_clear_sel")
+                _n3 = st.text_input("Remark (අනිවාර්යයි)", "", key="ot_clear_note",
+                                    placeholder="උදා: manual OT approved by manager")
+                if st.button("✅ Clear (OT justified)", type="primary", key="ot_clear_btn"):
+                    if not _s3:
+                        st.warning("Rows තෝරන්න.")
+                    elif not _n3.strip():
+                        st.warning("Remark එකක් අනිවාර්යයි.")
+                    else:
+                        n = _clear_audit_rows([_o3[s] for s in _s3],
+                                              schema.APPR_OT_CLEARED, _n3.strip())
+                        st.success(f"{n} rows clear කළා ✅ (remark සමඟ)")
+                        st.cache_data.clear()
+                        st.rerun()
 
     # 4) Weekly OT > 15
     with tabs[3]:
