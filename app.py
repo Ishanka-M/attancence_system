@@ -143,6 +143,9 @@ def style_flag(df: pd.DataFrame, color="#ffd6d6"):
     """Highlights an audit dataframe — background + dark text (readable)."""
     if df is None or df.empty:
         return df
+    df = df.reset_index(drop=True)
+    if pd.Index(df.columns).duplicated().any():
+        df = df.loc[:, ~pd.Index(df.columns).duplicated()]
     css = f"background-color:{color};color:#1f1f1f"
     return df.style.apply(lambda _: [css] * len(df.columns), axis=1)
 

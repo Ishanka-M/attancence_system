@@ -198,7 +198,10 @@ def get_df(sheet_key: str) -> pd.DataFrame:
         return pd.DataFrame(columns=schema.SHEETS[sheet_key]["headers"])
     header, *data = values
     df = pd.DataFrame(data, columns=header)
-    return df.loc[:, [c for c in df.columns if c != ""]]
+    df = df.loc[:, [c for c in df.columns if c != ""]]
+    # drop duplicate-named columns (keep first) — styler/UI duplicate-label errors වළක්වයි
+    df = df.loc[:, ~pd.Index(df.columns).duplicated()]
+    return df
 
 
 def append_rows(sheet_key: str, rows: list[list]):
