@@ -1,4 +1,4 @@
-# 📊 EFL CSS — KPI & Incentive System
+# 📊 Central System Support Team — KPI System
 
 මුල් **`KPI_CSS_-_EGF_OTH__2_.xlsb`** Excel file එක වෙනුවට හදපු
 **Streamlit + Python + Google Sheets** system එක.
@@ -65,12 +65,13 @@ Template එකක් download කරගන්න පුළුවන්. **Uploa
 Book1 format එකට — user එක එකකට මාසික **Cost to Company vs Revenue + Margin**:
 `Cost = Basic + OT-N/OT-D Amount + Fixed Incentive + EPF(12%) + ETF(3%) + Contractor Fee`,
 `Revenue = transactions`, `Margin = Revenue − Cost`. Margin අඩු (loss) users රතුවෙන් highlight.
-Salary data **🗂️ Data Manager → SALARY-M** එකෙන් දාන්න — **BASIC SALARY විතරක් ඇති**,
-OT-N rate (Basic÷240×1.5) සහ OT-D rate (Basic÷240×2) auto-derive වෙනවා.
+**OT-N / OT-D variance** (Revenue OT − OT Amount) columns දෙකකුත් තියෙනවා — OT වැඩ
+ලාභදායකද කියලා බලන්න. Salary data **🗂️ Data Manager → SALARY-M** එකෙන් දාන්න.
 
-### 🏠 Dashboard graphs (හැම user කෙනෙක්ටම)
-- **SITE level transaction volume** (current month) — bar chart
-- **Top 5 transaction performers** (current month) — leaderboard + bar chart
+### 🏠 Dashboard meters (හැම user කෙනෙක්ටම)
+- **SITE level transaction volume** (current month) — analog **gauge meters**
+- **Top 5 transaction performers** — 🥇🥈🥉 gauge meters
+- මාසය default current month එකට select වෙනවා.
 
 > මුල් Excel එකේ data ඔක්කොම (336 T-codes, 110 users, 128 customers, sites,
 > locations, times) seed data විදිහට මේකට දාලා තියෙනවා — Setup එක run කළාම
@@ -95,12 +96,16 @@ format එක එලෙසම තියෙනවා. Export කරද්දී d
 
 | # | Rule | වැඩේ |
 |---|------|------|
-| 1 | **20hr cap** | `# OF WORKING HRS` පැය 20+ → **Admin approval** ඕනේ. Approve වෙනකම් PENDING. |
-| 2 | **නිවාඩු/ඉරිදා** | ඉරිදා හෝ admin නිවාඩු දවසකට attendance → **Admin approval** ඕනේ. |
-| 3 | **OT ↔ Transaction** | Scheduled time එකට වඩා වැඩ කළොත් ඒ දවසට TRANSACTION එකේ **OT-N/OT-D** තියෙන්න ඕනේ. නැත්නම් flag. |
-| 4 | **Complaint penalty** | CUSTOMMER COMPLAINT එකක් user ට add වුණොත් incentive එකෙන් අඩු වෙනවා (default 1000/complaint). |
-| 5 | **සතියට OT 15+** | සතියකට `# OF OT HRS` 15 ඉක්මෙව්වොත් highlight. |
-| 6 | **Missing Txn** | දවසකට TRANSACTION දාලා නැති active users highlight. |
+| 1 | **20hr cap** | `# OF WORKING HRS` පැය 20+ → **Admin approval**. |
+| 2 | **නිවාඩු/ඉරිදා** | ඉරිදා/නිවාඩු දවසට attendance → **Admin approval**. |
+| 3 | **OT ↔ Transaction** | OT කළ දවසට TRANSACTION එකේ **OT-N/OT-D එක line එකක්** තිබ්බොත් ඇති. |
+| 4 | **Complaint penalty** | Complaint එකක් → incentive අඩු (1000/complaint). |
+| 5 | **සතියට OT 15+** | සතියකට OT 15 ඉක්මෙව්වොත් highlight. |
+| 6 | **මාසෙට OT 60+** | මාසෙකට OT 60 ඉක්මෙව්වොත් Audit violation. |
+| 7 | **Missing Txn** | දවසකට TRANSACTION දාලා නැති users. |
+
+> **Leaders ටත් Audit** පේනවා — තමන්ගේ team එකේ users ට අදාළව scope වෙලා.
+
 
 **වැඩ පැය schedule** (`schema.py` → `WORKDAY_HOURS`):
 සතියේ දවස් **08:00–17:00 = 8h** · සෙනසුරාදා **08:00–13:00 = 5h** · ඉරිදා **නිවාඩු**.

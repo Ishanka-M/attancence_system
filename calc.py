@@ -46,7 +46,7 @@ def _to_date(x):
             return (dt.date(1899, 12, 30) + dt.timedelta(days=int(float(s))))
     except (ValueError, TypeError):
         pass
-    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d"):
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y", "%Y/%m/%d"):
         try:
             return dt.datetime.strptime(s[:10], fmt).date()
         except ValueError:
@@ -95,6 +95,35 @@ def compute_attendance(date_val, in_str, out_str, lunch, utilized_hours, holiday
     ot = round(max(wh - sched, 0.0), 4)
     util = calc_attendance_utilization(utilized_hours, wh)
     return {"working": wh, "ot": ot, "sched": round(sched, 2), "utilization": util}
+
+
+# ───────── Excel-format helpers (ATTANDANCE save format) ─────────
+def excel_serial(date_val):
+    """date -> Excel serial number (1899-12-30 epoch). උදා 2026-06-30 -> 46203."""
+    d = _to_date(date_val)
+    return (d - dt.date(1899, 12, 30)).days if d else ""
+
+
+def fmt_date(date_val):
+    """date -> 'M/D/YYYY' (උදා 6/30/2026)."""
+    d = _to_date(date_val)
+    return f"{d.month}/{d.day}/{d.year}" if d else str(date_val or "")
+
+
+def fmt_datetime(x):
+    """datetime -> 'M/D/YYYY H:MM' (උදා 6/23/2026 8:00)."""
+    t = _to_datetime(x)
+    if t is None:
+        d = _to_date(x)
+        return fmt_date(d) if d else str(x or "")
+    return f"{t.month}/{t.day}/{t.year} {t.hour}:{t.minute:02d}"
+
+
+def unic_serial(date_val, uid):
+    """UNIC CODE = Excel serial + USER ID (උදා 46203CSSUN157)."""
+    s = excel_serial(date_val)
+    uid = str(uid).strip()
+    return f"{s}{uid}" if s != "" else uid
 
 
 def team_user_ids(user_df: pd.DataFrame, leader_uid: str) -> set:
@@ -586,8 +615,17 @@ def validate_attendance_upload(df: pd.DataFrame, existing_att: pd.DataFrame,
         needs, reason = attendance_needs_approval(res["working"], out.at[i, "DATE"], holidays)
         out.at[i, "APPROVAL STATUS"] = schema.APPR_PENDING if needs else schema.APPR_OK
         out.at[i, "APPROVAL NOTE"] = reason
-        if not str(out.at[i, "UNIC CODE"]).strip() and d and uid:
-            out.at[i, "UNIC CODE"] = d.strftime("%Y%m%d") + uid
+        # ── Excel save format: UNIC=serial+uid, DATE=M/D/YYYY, IN/OUT=M/D/YYYY H:MM ──
+        if d and uid:
+            out.at[i, "UNIC CODE"] = unic_serial(d, uid)
+        in_fmt = fmt_datetime(out.at[i, "IN DATE & TIME"])
+        out_fmt = fmt_datetime(out.at[i, "OUT DATE & TIME"])
+        if str(out.at[i, "IN DATE & TIME"]).strip():
+            out.at[i, "IN DATE & TIME"] = in_fmt
+        if str(out.at[i, "OUT DATE & TIME"]).strip():
+            out.at[i, "OUT DATE & TIME"] = out_fmt
+        if d:
+            out.at[i, "DATE"] = fmt_date(d)
 
     # weekly OT highlight (existing + new)
     combined = pd.concat([existing_att, out], ignore_index=True) \

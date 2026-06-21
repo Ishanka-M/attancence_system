@@ -95,9 +95,9 @@ TIME_OPTIONS = [schema.TIME_NORMAL, schema.TIME_OT_N, schema.TIME_OT_D]
 
 # ───────────────────────── helpers ─────────────────────────
 def unic(date_val, user_id: str) -> str:
-    """UNIC CODE = DATE + USER ID (original Excel pattern එකම)."""
-    d = date_val.strftime("%Y%m%d") if hasattr(date_val, "strftime") else str(date_val)
-    return f"{d}{user_id}"
+    """UNIC CODE = Excel serial + USER ID — ATTANDANCE සහ TRANSACTION දෙකම සමානයි.
+    එක දවසක attendance ↔ transactions UNIC CODE එකෙන් match කරගන්න පුළුවන්."""
+    return calc.unic_serial(date_val, user_id)
 
 
 @st.cache_data(ttl=60, show_spinner=False)
@@ -535,8 +535,8 @@ elif page == "🕐 Attendance":
         else:
             status, note = schema.APPR_PENDING, reason
         row = [
-            unic(date_v, uid), date_v.isoformat(), uid, uname, dept, subdept,
-            in_dt.strftime("%Y-%m-%d %H:%M"), out_dt.strftime("%Y-%m-%d %H:%M"),
+            calc.unic_serial(date_v, uid), calc.fmt_date(date_v), uid, uname, dept, subdept,
+            calc.fmt_datetime(in_dt), calc.fmt_datetime(out_dt),
             lunch, loc, "", round(wh, 2), round(ot, 2), "", "", "",
             round(util_hrs, 2), util, date_v.strftime("%a").upper(),
             remark, "", sched, status, note,
@@ -958,7 +958,7 @@ elif page == "📤 Upload":
                 if not str(aligned.at[i, "UNIC CODE"]).strip():
                     d = calc._to_date(aligned.at[i, "Date"]); uid = str(aligned.at[i, "USER ID"]).strip()
                     if d and uid:
-                        aligned.at[i, "UNIC CODE"] = d.strftime("%Y%m%d") + uid
+                        aligned.at[i, "UNIC CODE"] = calc.unic_serial(d, uid)
 
             save_df, disp, errmask = calc.validate_transaction_upload(aligned, lut)
             n_err = int(errmask.sum())
