@@ -822,3 +822,24 @@ def top_users_volume(txn_df: pd.DataFrame, month: str, n: int = 5) -> pd.DataFra
     if df.empty:
         return df
     return df.sort_values("VOLUME", ascending=False).head(n).reset_index(drop=True)
+
+
+def top_users_revenue(txn_df: pd.DataFrame, month: str, n: int = 5) -> pd.DataFrame:
+    """Current-month වැඩිම Revenue (Normal+OT-N+OT-D) කරපු top-N users."""
+    if txn_df is None or txn_df.empty or schema.T_DATE not in txn_df:
+        return pd.DataFrame()
+    rows = {}
+    for _, t in txn_df.iterrows():
+        d = _to_date(t.get(schema.T_DATE))
+        if d is None or _month_key(d) != month:
+            continue
+        key = (str(t.get(schema.T_USER, "")).strip(), str(t.get(schema.T_NAME, "")).strip())
+        if not key[0]:
+            continue
+        rev = _f(t.get(schema.T_REV_N)) + _f(t.get(schema.T_REV_OTN)) + _f(t.get(schema.T_REV_OTD))
+        rows[key] = rows.get(key, 0.0) + rev
+    data = [{"USER": (nm or uid), "REVENUE": round(v, 2)} for (uid, nm), v in rows.items()]
+    df = pd.DataFrame(data)
+    if df.empty:
+        return df
+    return df.sort_values("REVENUE", ascending=False).head(n).reset_index(drop=True)

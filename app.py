@@ -95,6 +95,7 @@ _REQUIRED_CALC = [
     "unic_serial", "fmt_date", "fmt_datetime", "excel_serial", "team_user_ids",
     "compute_attendance", "cost_revenue_report", "audit_monthly_ot",
     "validate_attendance_upload", "site_volume_month", "top_users_volume",
+    "top_users_revenue",
 ]
 _missing = [f for f in _REQUIRED_CALC if not hasattr(calc, f)]
 if _missing:
@@ -433,6 +434,24 @@ elif page == "🎛️ Meters":
                     use_container_width=True, key=f"top_{i}")
     else:
         st.bar_chart(top5.set_index("USER")["VOLUME"], color="#ffb454")
+
+    st.divider()
+    st.subheader("💰 වැඩිම Revenue කරපු Top 5")
+    topr = calc.top_users_revenue(full_txn, this_month, 5)
+    if topr.empty:
+        st.info("මේ මාසෙට data නෑ.")
+    elif HAS_PLOTLY:
+        mx = float(topr["REVENUE"].max())
+        medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣"]
+        gcolors = ["#ffd700", "#c0c0c0", "#cd7f32", "#46d39a", "#4da3ff"]
+        cols = st.columns(min(len(topr), 5))
+        for i, (_, r) in enumerate(topr.iterrows()):
+            with cols[i % len(cols)]:
+                st.plotly_chart(
+                    gauge(r["REVENUE"], mx, f"{medals[i]} {r['USER']}", gcolors[i]),
+                    use_container_width=True, key=f"topr_{i}")
+    else:
+        st.bar_chart(topr.set_index("USER")["REVENUE"], color="#46d39a")
 
 
 # ═══════════════════════════ TRANSACTION ═══════════════════════════
