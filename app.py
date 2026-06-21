@@ -368,6 +368,34 @@ elif page == "🏠 Dashboard":
     c3.metric("Total Incentive", f"{total_inc:,.0f}")
     c4.metric("Total OT Hrs", f"{total_ot:,.1f}")
 
+    # ── 🔍 Audit panel (මාසේ 1 → today, scoped) — violations තියෙනවා නම් විතරක් ──
+    _hol = _holidays_set()
+    _t = dt.date.today(); _ms = _t.replace(day=1)
+    _att = calc.filter_by_range(att, schema.A_DATE, _ms, _t)
+    _txn = calc.filter_by_range(txn, schema.T_DATE, _ms, _t)
+    _checks = {
+        "20hr+ Cap": calc.audit_working_hours_cap(_att),
+        "Holiday/Sunday": calc.audit_holiday_attendance(_att, _hol),
+        "OT w/o Txn": calc.audit_ot_without_transaction(_att, _txn, _hol),
+        "Weekly OT 15+": calc.audit_weekly_ot(_att),
+        "Monthly OT 60+": calc.audit_monthly_ot(_att),
+    }
+    _counts = {k: len(v) for k, v in _checks.items() if not v.empty}
+    _total = sum(_counts.values())
+    if _total:
+        with st.expander(f"🔍 Audit — Rule Violations ({_total}) · {calc.fmt_date(_ms)}–{calc.fmt_date(_t)}",
+                         expanded=True):
+            st.caption("මාසේ 1 සිට අද දක්වා — විස්තර 🔍 Audit page එකේ.")
+            _bc = st.columns(len(_counts))
+            for _i, (_k, _n) in enumerate(_counts.items()):
+                _bc[_i].metric(_k, _n)
+            for _k, _v in _checks.items():
+                if not _v.empty:
+                    st.markdown(f"**{_k}** ({len(_v)})")
+                    st.dataframe(style_flag(_v.head(20)), use_container_width=True, hide_index=True)
+    else:
+        st.success("🔍 Audit — Rule Violations නෑ ✅ (මාසේ 1 → අද)")
+
     st.divider()
     st.subheader("📅 Monthly — User level (OT / Revenue / Cost / Incentive)")
     summ_all = calc.monthly_user_summary(txn, att)
@@ -391,10 +419,6 @@ elif page == "🏠 Dashboard":
                   "TOTAL REV", "INCENTIVE", "COST"]],
             use_container_width=True, hide_index=True,
         )
-
-        st.subheader("📈 මාසික Revenue trend")
-        trend = summ_all.groupby("MONTH")["TOTAL REV"].sum()
-        st.line_chart(trend)
 
 
 # ═══════════════════════════ METERS (analog) ═══════════════════════════
@@ -802,7 +826,12 @@ elif page == "💵 Cost/Revenue":
                 m = calc._f(row["MARGIN"])
                 bg = "#3a1d1d" if m < 0 else "#1d3a24"
                 return [f"background-color:{bg};color:#e8eaed"] * len(row)
-            st.dataframe(rep.style.apply(_mcolor, axis=1),
+            _money = ["BASIC SALARY", "OT-N AMOUNT", "OT-D AMOUNT", "FIXED INCENTIVE",
+                      "TOTAL GROSS", "EPF", "ETF", "CONTRACTOR FEE", "COST TO COMPANY",
+                      "REVENUE NORMAL", "REVENUE OT-N", "REVENUE OT-D", "OT-N VARIANCE",
+                      "OT-D VARIANCE", "TOTAL REVENUE", "MARGIN", "OT-N HRS", "OT-D HRS"]
+            _fmt = {c: "{:.3f}" for c in _money if c in rep.columns}
+            st.dataframe(rep.style.apply(_mcolor, axis=1).format(_fmt),
                          use_container_width=True, hide_index=True)
 
             import io

@@ -691,14 +691,18 @@ def _ot_split_and_days(att_df: pd.DataFrame, holidays: set, month: str):
         if not uid:
             continue
         wh = _f(a.get(schema.A_WH))
+        loc = str(a.get("WORCK LOCATION", "")).strip().upper()
         sched = scheduled_hours(d, holidays)
-        s = acc.setdefault(uid, {"days": 0, "otn": 0.0, "otd": 0.0})
-        if wh > 0:
-            s["days"] += 1
+        s = acc.setdefault(uid, {"days": set(), "otn": 0.0, "otd": 0.0})
+        # WORKED DAYS = ඇත්තටම වැඩ කරපු වෙනස් දවස් (leave/0-hour නෑ)
+        if wh > 0 and loc != "LEAVE":
+            s["days"].add(d.isoformat())
         if sched <= 0:
             s["otd"] += wh
         else:
             s["otn"] += max(wh - sched, 0.0)
+    for uid in acc:
+        acc[uid]["days"] = len(acc[uid]["days"])   # set -> දවස් ගණන
     return acc
 
 
@@ -752,32 +756,32 @@ def cost_revenue_report(att_df, txn_df, salary_df, user_df, holidays, month):
         etf_pct = _f(s.get("ETF %"), schema.ETF_PCT) or schema.ETF_PCT
         contractor = _f(s.get("CONTRACTOR FEE")) if len(s) else 0.0
 
-        otn_amt = round(o["otn"] * otn_rate, 2)
-        otd_amt = round(o["otd"] * otd_rate, 2)
-        gross = round(basic + otn_amt + otd_amt + fixed_inc, 2)
-        epf = round(basic * epf_pct / 100, 2)
-        etf = round(basic * etf_pct / 100, 2)
-        cost = round(gross + epf + etf + contractor, 2)
-        total_rev = round(rv["n"] + rv["otn"] + rv["otd"], 2)
+        otn_amt = round(o["otn"] * otn_rate, 3)
+        otd_amt = round(o["otd"] * otd_rate, 3)
+        gross = round(basic + otn_amt + otd_amt + fixed_inc, 3)
+        epf = round(basic * epf_pct / 100, 3)
+        etf = round(basic * etf_pct / 100, 3)
+        cost = round(gross + epf + etf + contractor, 3)
+        total_rev = round(rv["n"] + rv["otn"] + rv["otd"], 3)
         rows.append({
             "USER ID": uid,
             "CSS USER NAME": (s.get("CSS USER NAME") if len(s) and str(s.get("CSS USER NAME", "")).strip() else name.get(uid, "")),
             "JOB TITLE": s.get("JOB TITLE", "") if len(s) else "",
             "WORKED DAYS": o["days"],
-            "OT-N HRS": round(o["otn"], 2), "OT-D HRS": round(o["otd"], 2),
-            "BASIC SALARY": round(basic, 2),
+            "OT-N HRS": round(o["otn"], 3), "OT-D HRS": round(o["otd"], 3),
+            "BASIC SALARY": round(basic, 3),
             "OT-N AMOUNT": otn_amt, "OT-D AMOUNT": otd_amt,
-            "FIXED INCENTIVE": round(fixed_inc, 2),
+            "FIXED INCENTIVE": round(fixed_inc, 3),
             "TOTAL GROSS": gross, "EPF": epf, "ETF": etf,
-            "CONTRACTOR FEE": round(contractor, 2),
+            "CONTRACTOR FEE": round(contractor, 3),
             "COST TO COMPANY": cost,
-            "REVENUE NORMAL": round(rv["n"], 2),
-            "REVENUE OT-N": round(rv["otn"], 2),
-            "REVENUE OT-D": round(rv["otd"], 2),
-            "OT-N VARIANCE": round(rv["otn"] - otn_amt, 2),
-            "OT-D VARIANCE": round(rv["otd"] - otd_amt, 2),
+            "REVENUE NORMAL": round(rv["n"], 3),
+            "REVENUE OT-N": round(rv["otn"], 3),
+            "REVENUE OT-D": round(rv["otd"], 3),
+            "OT-N VARIANCE": round(rv["otn"] - otn_amt, 3),
+            "OT-D VARIANCE": round(rv["otd"] - otd_amt, 3),
             "TOTAL REVENUE": total_rev,
-            "MARGIN": round(total_rev - cost, 2),
+            "MARGIN": round(total_rev - cost, 3),
         })
     cols = ["USER ID", "CSS USER NAME", "JOB TITLE", "WORKED DAYS", "OT-N HRS",
             "OT-D HRS", "BASIC SALARY", "OT-N AMOUNT", "OT-D AMOUNT",
