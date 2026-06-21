@@ -373,17 +373,15 @@ def audit_ot_without_transaction(att_df: pd.DataFrame, txn_df: pd.DataFrame,
 
     flagged = []
     for _, a in att_df.iterrows():
-        wh = _f(a.get("# OF WORKING HRS"))
         ot_h = _f(a.get("# OF OT HRS"))
-        d = _to_date(a.get("DATE"))
-        sched = scheduled_hours(a.get("DATE"), holidays)
-        did_ot = (ot_h > 0) or (wh > sched)
-        if not did_ot:
+        # # OF OT HRS = 0 නම් OT නෑ -> flag කරන්නේ නෑ (column එක authoritative)
+        if ot_h <= 0:
             continue
+        d = _to_date(a.get("DATE"))
         key = (str(a.get("USER ID", "")).strip(), d.isoformat() if d else "")
         if key not in ot_keys:
             row = a.to_dict()
-            row["EXTRA HRS"] = round(max(wh - sched, ot_h), 2)
+            row["EXTRA HRS"] = round(ot_h, 2)
             row["ISSUE"] = "OT වැඩ කරලා OT-N/OT-D transaction නෑ"
             flagged.append(row)
     return pd.DataFrame(flagged)
