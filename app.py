@@ -516,75 +516,104 @@ elif page == "🕐 Attendance":
     loc_opts = locs["LOCATION"].tolist() if "LOCATION" in locs else ["EGF"]
     holidays = _holidays_set()
 
-    with st.form("att"):
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            date_v = st.date_input("DATE", dt.date.today())
-            uid, uname = user_picker("USER", key="att_user")
-        with c2:
-            in_t = st.time_input("IN TIME", dt.time(8, 0))
-            out_t = st.time_input("OUT TIME", dt.time(17, 0))
-        with c3:
-            loc = st.selectbox("WORK LOCATION", loc_opts)
-            lunch = st.number_input("LUNCH & TEA (hrs)", 0.0, 5.0,
-                                    float(schema.LUNCH_TEA_HOURS), 0.25)
+    entry_type = st.radio("Entry type", ["💼 Work", "🌴 Leave"],
+                          horizontal=True, key="att_entry_type")
 
-        # ── auto-compute: WORKING = (OUT−IN) − LUNCH, OT = WORKING − SCHEDULED ──
-        in_dt = dt.datetime.combine(date_v, in_t)
-        out_dt = dt.datetime.combine(date_v, out_t)
-        if out_dt < in_dt:
-            out_dt += dt.timedelta(days=1)   # රෑ පහුවෙනවා නම්
-        res = calc.compute_attendance(date_v, in_dt.isoformat(" "),
-                                      out_dt.isoformat(" "), lunch, 0, holidays)
-        wh, ot, sched = res["working"], res["ot"], res["sched"]
+    if entry_type == "🌴 Leave":
+        with st.form("att_leave"):
+            lc1, lc2 = st.columns(2)
+            with lc1:
+                date_v = st.date_input("DATE", dt.date.today(), key="lv_date")
+                uid, uname = user_picker("USER", key="lv_user")
+            with lc2:
+                leave_type = st.selectbox("Leave Type", [
+                    "Annual Leave", "Casual Leave", "Medical Leave",
+                    "No-Pay Leave", "Half Day", "Off"])
+                lv_remark = st.text_input("REMARK", "", key="lv_remark")
+            sub_lv = st.form_submit_button("➕ Add Leave", type="primary")
+        if sub_lv and uid:
+            udf = _users(); urow = udf[udf["USER ID"] == uid]
+            dept = urow["DEPARTMENT"].iloc[0] if not urow.empty else ""
+            subdept = urow["SUB DEPARTMENT"].iloc[0] if not urow.empty and "SUB DEPARTMENT" in urow else ""
+            sched = calc.scheduled_hours(date_v, holidays)
+            rmk = leave_type + (f" — {lv_remark}" if lv_remark else "")
+            row = [calc.unic_serial(date_v, uid), calc.fmt_date(date_v), uid, uname,
+                   dept, subdept, "", "", 0, "LEAVE", "", 0, 0, "", "", "", 0, 0,
+                   date_v.strftime("%a").upper(), rmk, "", sched, schema.APPR_OK, "Leave"]
+            gsheets.append_rows("ATTANDANCE", [row])
+            st.success(f"🌴 Leave add කලා ✅ — {leave_type} ({calc.fmt_date(date_v)})")
+            st.cache_data.clear()
 
-        i1, i2, i3, i4 = st.columns(4)
-        i1.metric("Working HRS", f"{wh:.2f}", help="(OUT − IN) − LUNCH & TEA")
-        i2.metric("OT HRS", f"{ot:.2f}")
-        i3.metric("Scheduled", f"{sched:.0f}")
-        i4.metric("Day", date_v.strftime("%a"))
-        remark = st.text_input("REMARK", "")
+    else:
+        with st.form("att"):
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                date_v = st.date_input("DATE", dt.date.today())
+                uid, uname = user_picker("USER", key="att_user")
+            with c2:
+                in_t = st.time_input("IN TIME", dt.time(8, 0))
+                out_t = st.time_input("OUT TIME", dt.time(17, 0))
+            with c3:
+                loc = st.selectbox("WORK LOCATION", loc_opts)
+                lunch = st.number_input("LUNCH & TEA (hrs)", 0.0, 5.0,
+                                        float(schema.LUNCH_TEA_HOURS), 0.25)
 
-        needs_appr, reason = calc.attendance_needs_approval(wh, date_v, holidays)
-        if needs_appr:
-            st.warning(f"⚠️ Approval ඕනේ: {reason}. "
-                       + ("Admin නිසා approve වෙයි." if IS_ADMIN
-                          else "PENDING විදිහට save වෙයි."))
-        submitted = st.form_submit_button("➕ Add Attendance", type="primary")
+            # ── auto-compute: WORKING = (OUT−IN) − LUNCH, OT = WORKING − SCHEDULED ──
+            in_dt = dt.datetime.combine(date_v, in_t)
+            out_dt = dt.datetime.combine(date_v, out_t)
+            if out_dt < in_dt:
+                out_dt += dt.timedelta(days=1)   # රෑ පහුවෙනවා නම්
+            res = calc.compute_attendance(date_v, in_dt.isoformat(" "),
+                                          out_dt.isoformat(" "), lunch, 0, holidays)
+            wh, ot, sched = res["working"], res["ot"], res["sched"]
 
-    if submitted and uid:
-        # UTILIZED HOURS = ඒ user+date එකට TRANSACTION වල utilize එකතුව
-        tdf = gsheets.get_df("TRANSACTION")
-        util_hrs = 0.0
-        if not tdf.empty and {"USER ID", "Date", "UTILIZE HOURS"} <= set(tdf.columns):
-            for _, t in tdf.iterrows():
-                td = calc._to_date(t.get("Date"))
-                if td == date_v and str(t.get("USER ID", "")).strip() == uid:
-                    util_hrs += calc._f(t.get("UTILIZE HOURS"))
-        util = calc.calc_attendance_utilization(util_hrs, wh)
-        udf = _users()
-        urow = udf[udf["USER ID"] == uid]
-        dept = urow["DEPARTMENT"].iloc[0] if not urow.empty else ""
-        subdept = urow["SUB DEPARTMENT"].iloc[0] if not urow.empty and "SUB DEPARTMENT" in urow else ""
-        if not needs_appr:
-            status, note = schema.APPR_OK, ""
-        elif IS_ADMIN:
-            status, note = schema.APPR_APPROVED, f"Admin approved: {reason}"
-        else:
-            status, note = schema.APPR_PENDING, reason
-        row = [
-            calc.unic_serial(date_v, uid), calc.fmt_date(date_v), uid, uname, dept, subdept,
-            calc.fmt_datetime(in_dt), calc.fmt_datetime(out_dt),
-            lunch, loc, "", round(wh, 2), round(ot, 2), "", "", "",
-            round(util_hrs, 2), util, date_v.strftime("%a").upper(),
-            remark, "", sched, status, note,
-        ]
-        gsheets.append_rows("ATTANDANCE", [row])
-        if status == schema.APPR_PENDING:
-            st.warning(f"PENDING විදිහට save කළා ⏳ ({reason})")
-        else:
-            st.success(f"Added ✅  Working {wh:.2f}h · OT {ot:.2f}h · Util {util:.1%}")
-        st.cache_data.clear()
+            i1, i2, i3, i4 = st.columns(4)
+            i1.metric("Working HRS", f"{wh:.2f}", help="(OUT − IN) − LUNCH & TEA")
+            i2.metric("OT HRS", f"{ot:.2f}")
+            i3.metric("Scheduled", f"{sched:.0f}")
+            i4.metric("Day", date_v.strftime("%a"))
+            remark = st.text_input("REMARK", "")
+
+            needs_appr, reason = calc.attendance_needs_approval(wh, date_v, holidays)
+            if needs_appr:
+                st.warning(f"⚠️ Approval ඕනේ: {reason}. "
+                           + ("Admin නිසා approve වෙයි." if IS_ADMIN
+                              else "PENDING විදිහට save වෙයි."))
+            submitted = st.form_submit_button("➕ Add Attendance", type="primary")
+
+        if submitted and uid:
+            # UTILIZED HOURS = ඒ user+date එකට TRANSACTION වල utilize එකතුව
+            tdf = gsheets.get_df("TRANSACTION")
+            util_hrs = 0.0
+            if not tdf.empty and {"USER ID", "Date", "UTILIZE HOURS"} <= set(tdf.columns):
+                for _, t in tdf.iterrows():
+                    td = calc._to_date(t.get("Date"))
+                    if td == date_v and str(t.get("USER ID", "")).strip() == uid:
+                        util_hrs += calc._f(t.get("UTILIZE HOURS"))
+            util = calc.calc_attendance_utilization(util_hrs, wh)
+            udf = _users()
+            urow = udf[udf["USER ID"] == uid]
+            dept = urow["DEPARTMENT"].iloc[0] if not urow.empty else ""
+            subdept = urow["SUB DEPARTMENT"].iloc[0] if not urow.empty and "SUB DEPARTMENT" in urow else ""
+            if not needs_appr:
+                status, note = schema.APPR_OK, ""
+            elif IS_ADMIN:
+                status, note = schema.APPR_APPROVED, f"Admin approved: {reason}"
+            else:
+                status, note = schema.APPR_PENDING, reason
+            row = [
+                calc.unic_serial(date_v, uid), calc.fmt_date(date_v), uid, uname, dept, subdept,
+                calc.fmt_datetime(in_dt), calc.fmt_datetime(out_dt),
+                lunch, loc, "", round(wh, 2), round(ot, 2), "", "", "",
+                round(util_hrs, 2), util, date_v.strftime("%a").upper(),
+                remark, "", sched, status, note,
+            ]
+            gsheets.append_rows("ATTANDANCE", [row])
+            if status == schema.APPR_PENDING:
+                st.warning(f"PENDING විදිහට save කළා ⏳ ({reason})")
+            else:
+                st.success(f"Added ✅  Working {wh:.2f}h · OT {ot:.2f}h · Util {util:.1%}")
+            st.cache_data.clear()
 
     st.divider()
     df_show(gsheets.get_df("ATTANDANCE"))
