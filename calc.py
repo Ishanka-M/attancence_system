@@ -843,3 +843,48 @@ def top_users_revenue(txn_df: pd.DataFrame, month: str, n: int = 5) -> pd.DataFr
     if df.empty:
         return df
     return df.sort_values("REVENUE", ascending=False).head(n).reset_index(drop=True)
+
+
+def ot_report(att_df: pd.DataFrame, holidays: set, start=None, end=None):
+    """
+    User-wise total OT report. start/end දුන්නොත් ඒ range එකට filter වෙනවා.
+      OT-N = normal දවස් වල OT (working − scheduled)
+      OT-D = rest day (ඉරිදා/නිවාඩු) වැඩ
+      TOTAL OT = OT-N + OT-D
+    """
+    if att_df is None or att_df.empty or schema.A_DATE not in att_df:
+        return pd.DataFrame(columns=["USER ID", "USER NAME", "WORKED DAYS",
+                                     "OT-N HRS", "OT-D HRS", "TOTAL OT HRS"])
+    s = _to_date(start) if start else None
+    e = _to_date(end) if end else None
+    acc = {}
+    for _, a in att_df.iterrows():
+        d = _to_date(a.get(schema.A_DATE))
+        if d is None:
+            continue
+        if (s and d < s) or (e and d > e):
+            continue
+        uid = str(a.get(schema.A_USER, "")).strip()
+        if not uid:
+            continue
+        wh = _f(a.get(schema.A_WH))
+        sched = scheduled_hours(d, holidays)
+        rec = acc.setdefault(uid, {"name": a.get("USER NAME", ""), "days": 0,
+                                   "otn": 0.0, "otd": 0.0})
+        if not rec["name"]:
+            rec["name"] = a.get("USER NAME", "")
+        if wh > 0:
+            rec["days"] += 1
+        if sched <= 0:
+            rec["otd"] += wh
+        else:
+            rec["otn"] += max(wh - sched, 0.0)
+    rows = []
+    for uid, r in acc.items():
+        otn, otd = round(r["otn"], 2), round(r["otd"], 2)
+        rows.append({"USER ID": uid, "USER NAME": r["name"], "WORKED DAYS": r["days"],
+                     "OT-N HRS": otn, "OT-D HRS": otd,
+                     "TOTAL OT HRS": round(otn + otd, 2)})
+    df = pd.DataFrame(rows, columns=["USER ID", "USER NAME", "WORKED DAYS",
+                                     "OT-N HRS", "OT-D HRS", "TOTAL OT HRS"])
+    return df.sort_values("TOTAL OT HRS", ascending=False).reset_index(drop=True) if not df.empty else df

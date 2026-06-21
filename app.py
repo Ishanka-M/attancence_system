@@ -95,7 +95,7 @@ _REQUIRED_CALC = [
     "unic_serial", "fmt_date", "fmt_datetime", "excel_serial", "team_user_ids",
     "compute_attendance", "cost_revenue_report", "audit_monthly_ot",
     "validate_attendance_upload", "site_volume_month", "top_users_volume",
-    "top_users_revenue",
+    "top_users_revenue", "ot_report",
 ]
 _missing = [f for f in _REQUIRED_CALC if not hasattr(calc, f)]
 if _missing:
@@ -290,14 +290,14 @@ if IS_ADMIN:
     PAGES = [
         "🏠 Dashboard", "🎛️ Meters", "⚙️ Setup", "📝 Transaction", "🕐 Attendance",
         "⏱️ OT Approval", "📋 Complaint", "✅ KPI Update", "💰 Incentive",
-        "💵 Cost/Revenue", "🔍 Audit", "📥 Export", "📤 Upload", "🛡️ Admin",
-        "🗂️ Data Manager",
+        "💵 Cost/Revenue", "🕒 OT Report", "🔍 Audit", "📥 Export", "📤 Upload",
+        "🛡️ Admin", "🗂️ Data Manager",
     ]
 else:
-    PAGES = ["🏠 Dashboard", "🎛️ Meters", "📝 Transaction", "🕐 Attendance",
+    PAGES = ["🏠 Dashboard", "📝 Transaction", "🕐 Attendance",
              "💰 Incentive", "📤 Upload"]
     if IS_LEADER:
-        PAGES.insert(5, "🔍 Audit")   # leader -> team Audit
+        PAGES.insert(4, "🔍 Audit")   # leader -> team Audit
 
 page = st.sidebar.radio("Menu", PAGES, label_visibility="collapsed")
 
@@ -399,6 +399,9 @@ elif page == "🏠 Dashboard":
 # ═══════════════════════════ METERS (analog) ═══════════════════════════
 elif page == "🎛️ Meters":
     st.header("🎛️ Analog Meters")
+    if not IS_ADMIN:
+        st.warning("Admin ලට පමණයි.")
+        st.stop()
     this_month = dt.date.today().strftime("%Y-%m")
     st.caption(f"Company-wide · {this_month} · හැම user කෙනෙක්ටම")
     full_txn = gsheets.get_df("TRANSACTION")   # unscoped: company-wide
@@ -785,6 +788,48 @@ elif page == "💵 Cost/Revenue":
             st.bar_chart(chart)
 
 
+# ═══════════════════════════ OT REPORT ═══════════════════════════
+elif page == "🕒 OT Report":
+    st.header("🕒 User-wise Total OT Report")
+    if not IS_ADMIN:
+        st.warning("Admin ලට පමණයි.")
+        st.stop()
+    _today = dt.date.today()
+    _mstart = _today.replace(day=1)
+    c1, c2 = st.columns(2)
+    d_from = c1.date_input("From", _mstart, key="otr_from")
+    d_to = c2.date_input("To", _today, key="otr_to")
+    st.caption(f"{calc.fmt_date(d_from)} – {calc.fmt_date(d_to)} · "
+               "OT-N = normal දවස් OT · OT-D = නිවාඩු/ඉරිදා වැඩ")
+
+    rep = calc.ot_report(gsheets.get_df("ATTANDANCE"), _holidays_set(), d_from, d_to)
+    if rep.empty:
+        st.info("මේ range එකට OT data නෑ.")
+    else:
+        t1, t2, t3 = st.columns(3)
+        t1.metric("Total OT Hrs", f'{rep["TOTAL OT HRS"].sum():,.1f}')
+        t2.metric("OT-N", f'{rep["OT-N HRS"].sum():,.1f}')
+        t3.metric("OT-D", f'{rep["OT-D HRS"].sum():,.1f}')
+
+        # monthly cap 60 ඉක්මෙව්ව ඒවා රතුවෙන්
+        def _c(row):
+            over = calc._f(row["TOTAL OT HRS"]) > schema.MONTHLY_OT_CAP
+            bg = "#3a1d1d" if over else "transparent"
+            return [f"background-color:{bg};color:#e8eaed"] * len(row)
+        st.dataframe(rep.style.apply(_c, axis=1), use_container_width=True, hide_index=True)
+        st.caption(f"🔴 රතු = මාසික OT cap ({schema.MONTHLY_OT_CAP}h) ඉක්මවලා.")
+
+        st.bar_chart(rep.set_index("USER NAME")["TOTAL OT HRS"], color="#ffb454")
+
+        import io
+        buf = io.BytesIO()
+        with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+            rep.to_excel(xw, sheet_name="OT Report", index=False)
+        st.download_button("⬇️ Excel download", buf.getvalue(),
+                           file_name=f"OT_Report_{d_from}_{d_to}.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
 # ═══════════════════════════ AUDIT ═══════════════════════════
 elif page == "🔍 Audit":
     st.header("🔍 Audit — Rule Violations"
@@ -797,6 +842,16 @@ elif page == "🔍 Audit":
         st.info("මුලින් Setup එකෙන් sheets create කරන්න.")
         st.stop()
     holidays = _holidays_set()
+
+    # ── මාසේ 1 සිට today දක්වා range (default) ──
+    _today = dt.date.today()
+    _mstart = _today.replace(day=1)
+    cf1, cf2 = st.columns(2)
+    d_from = cf1.date_input("From", _mstart, key="audit_from")
+    d_to = cf2.date_input("To", _today, key="audit_to")
+    st.caption(f"Rule violations check කරන්නේ **{calc.fmt_date(d_from)} – {calc.fmt_date(d_to)}** range එකට.")
+    att = calc.filter_by_range(att, schema.A_DATE, d_from, d_to)
+    txn = calc.filter_by_range(txn, schema.T_DATE, d_from, d_to)
 
     tabs = st.tabs([
         "🚫 20hr+ Cap", "📅 Holiday/Sunday", "⏱️ OT w/o Txn",
