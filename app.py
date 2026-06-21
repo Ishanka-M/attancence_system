@@ -624,6 +624,10 @@ elif page == "🕐 Attendance":
         res = calc.compute_attendance(date_v, in_dt.isoformat(" "),
                                       out_dt.isoformat(" "), lunch, 0, holidays)
         wh, ot, sched = res["working"], res["ot"], res["sched"]
+        # WORK LOCATION = LEAVE/OFF -> working day නෙවෙයි
+        if calc.is_non_work_location(loc):
+            wh, ot = 0.0, 0.0
+            st.info(f"ℹ️ '{loc}' is a non-working location — working/OT counted as 0.")
 
         i1, i2, i3, i4 = st.columns(4)
         i1.metric("Working HRS", f"{wh:.2f}", help="(OUT − IN) − LUNCH & TEA")

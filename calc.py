@@ -176,6 +176,15 @@ def is_rest_day(date_val, holidays: set | None = None) -> bool:
     return scheduled_hours(date_val, holidays) <= 0
 
 
+# WORCK LOCATION values that are NOT working days (leave/off) — excluded from
+# worked-days, working-hours and OT calculations everywhere.
+NON_WORK_LOCATIONS = ("LEAVE", "OFF")
+
+
+def is_non_work_location(loc) -> bool:
+    return str(loc).strip().upper() in NON_WORK_LOCATIONS
+
+
 def holiday_set(holiday_df: pd.DataFrame) -> set:
     """HOLIDAY-M -> {ISO date strings}."""
     out = set()
@@ -349,8 +358,10 @@ def audit_holiday_attendance(att_df: pd.DataFrame, holidays: set) -> pd.DataFram
     df = att_df.copy()
     df["_rest"] = df["DATE"].apply(lambda d: is_rest_day(d, holidays))
     status = df.get("APPROVAL STATUS", pd.Series([""] * len(df))).astype(str).str.upper()
-    # APPROVED හෝ OFF mark කරපු rows -> clear (audit එකේ පෙන්නන්නේ නෑ)
-    cleared = status.isin([schema.APPR_APPROVED, schema.APPR_OFF])
+    loc = df.get("WORCK LOCATION", pd.Series([""] * len(df))).astype(str).str.upper()
+    # APPROVED/OFF status හෝ LEAVE/OFF location -> clear (working day නෙවෙයි)
+    cleared = status.isin([schema.APPR_APPROVED, schema.APPR_OFF]) | \
+        loc.isin([s.upper() for s in NON_WORK_LOCATIONS])
     mask = df["_rest"] & (~cleared)
     return df[mask].drop(columns=["_rest"])
 
@@ -602,6 +613,9 @@ def validate_attendance_upload(df: pd.DataFrame, existing_att: pd.DataFrame,
         res = compute_attendance(out.at[i, "DATE"], out.at[i, "IN DATE & TIME"],
                                  out.at[i, "OUT DATE & TIME"], lunch,
                                  util_lut.get((uid, diso), 0.0), holidays)
+        # LEAVE / OFF -> working day නෙවෙයි
+        if is_non_work_location(out.at[i, "WORCK LOCATION"]):
+            res = {"working": 0, "ot": 0, "sched": res["sched"], "utilization": 0}
         out.at[i, "LUNCH & TEA"] = lunch
         out.at[i, "# OF WORKING HRS"] = res["working"]
         out.at[i, "# OF OT HRS"] = res["ot"]
@@ -699,8 +713,10 @@ def _ot_split_and_days(att_df: pd.DataFrame, holidays: set, month: str):
         loc = str(a.get("WORCK LOCATION", "")).strip().upper()
         sched = scheduled_hours(d, holidays)
         s = acc.setdefault(uid, {"days": set(), "otn": 0.0, "otd": 0.0})
-        # WORKED DAYS = ඇත්තටම වැඩ කරපු වෙනස් දවස් (leave/0-hour නෑ)
-        if wh > 0 and loc != "LEAVE":
+        # LEAVE / OFF -> working day එකක් නෙවෙයි, OT එකක් නෙවෙයි
+        if loc in NON_WORK_LOCATIONS:
+            continue
+        if wh > 0:
             s["days"].add(d.isoformat())
         if sched <= 0:
             s["otd"] += wh
@@ -874,6 +890,8 @@ def ot_report(att_df: pd.DataFrame, holidays: set, start=None, end=None):
         uid = str(a.get(schema.A_USER, "")).strip()
         if not uid:
             continue
+        if is_non_work_location(a.get("WORCK LOCATION", "")):
+            continue   # LEAVE / OFF -> working day නෙවෙයි
         wh = _f(a.get(schema.A_WH))
         sched = scheduled_hours(d, holidays)
         rec = acc.setdefault(uid, {"name": a.get("USER NAME", ""), "days": 0,
@@ -920,8 +938,15 @@ def recompute_attendance_df(df: pd.DataFrame, holidays: set,
         loc = str(out.at[i, "WORCK LOCATION"]).strip().upper() if "WORCK LOCATION" in out else ""
         in_s = str(out.at[i, "IN DATE & TIME"]).strip() if "IN DATE & TIME" in out else ""
         out_s = str(out.at[i, "OUT DATE & TIME"]).strip() if "OUT DATE & TIME" in out else ""
-        if loc == "LEAVE" or not in_s or not out_s:
-            continue   # leave / IN-OUT නැති rows අත නෑ
+        # LEAVE / OFF -> working day නෙවෙයි: working/OT = 0
+        if loc in NON_WORK_LOCATIONS:
+            out.at[i, "# OF WORKING HRS"] = 0
+            out.at[i, "# OF OT HRS"] = 0
+            out.at[i, "UTILIZED HOURS"] = 0
+            out.at[i, "UTILIZATION"] = 0
+            continue
+        if not in_s or not out_s:
+            continue   # IN-OUT නැති rows අත නෑ
         d = _to_date(out.at[i, "DATE"]) if "DATE" in out else None
         uid = str(out.at[i, "USER ID"]).strip() if "USER ID" in out else ""
         lunch = _f(out.at[i, "LUNCH & TEA"], 1.0) or 1.0
