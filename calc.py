@@ -185,6 +185,35 @@ def is_non_work_location(loc) -> bool:
     return str(loc).strip().upper() in NON_WORK_LOCATIONS
 
 
+def row_ot_split(working, date_val, location=None, holidays: set | None = None):
+    """
+    එක attendance row එකක OT split — system එක පුරාම SAME logic (ot_report එකට ගැළපෙනවා):
+      • LEAVE/OFF      -> (0, 0)
+      • rest day (Sun/holiday, scheduled<=0) -> OT-D = working
+      • normal day     -> OT-N = max(working − scheduled, 0)
+    return: (otn, otd)
+    """
+    if is_non_work_location(location):
+        return 0.0, 0.0
+    w = _f(working)
+    sched = scheduled_hours(date_val, holidays)
+    if sched <= 0:
+        return 0.0, max(w, 0.0)
+    return max(w - sched, 0.0), 0.0
+
+
+def attendance_ot_total(att_df: pd.DataFrame, holidays: set | None = None) -> float:
+    """Total OT (OT-N + OT-D) — ot_report එකට ගැළපෙන විදිහට (LEAVE/OFF skip)."""
+    if att_df is None or att_df.empty or schema.A_DATE not in att_df:
+        return 0.0
+    tot = 0.0
+    for _, a in att_df.iterrows():
+        otn, otd = row_ot_split(a.get(schema.A_WH), a.get(schema.A_DATE),
+                                a.get("WORCK LOCATION"), holidays)
+        tot += otn + otd
+    return round(tot, 2)
+
+
 def holiday_set(holiday_df: pd.DataFrame) -> set:
     """HOLIDAY-M -> {ISO date strings}."""
     out = set()
@@ -403,8 +432,8 @@ def audit_ot_without_transaction(att_df: pd.DataFrame, txn_df: pd.DataFrame,
     return pd.DataFrame(flagged)
 
 
-def audit_weekly_ot(att_df: pd.DataFrame) -> pd.DataFrame:
-    """සතියකට OT පැය 15+ ගිය user-week combinations."""
+def audit_weekly_ot(att_df: pd.DataFrame, holidays: set | None = None) -> pd.DataFrame:
+    """සතියකට OT පැය 15+ ගිය user-week combinations (LEAVE/OFF skip, recomputed OT)."""
     if att_df.empty or "# OF OT HRS" not in att_df:
         return pd.DataFrame()
     recs = []
@@ -412,11 +441,12 @@ def audit_weekly_ot(att_df: pd.DataFrame) -> pd.DataFrame:
         d = _to_date(a.get("DATE"))
         if d is None:
             continue
+        otn, otd = row_ot_split(a.get(schema.A_WH), d, a.get("WORCK LOCATION"), holidays)
         recs.append({
             "USER ID": str(a.get("USER ID", "")).strip(),
             "USER NAME": a.get("USER NAME", ""),
             "WEEK": _week_key(d),
-            "OT": _f(a.get("# OF OT HRS")),
+            "OT": otn + otd,
         })
     if not recs:
         return pd.DataFrame()
@@ -427,8 +457,8 @@ def audit_weekly_ot(att_df: pd.DataFrame) -> pd.DataFrame:
         "WEEKLY OT HRS", ascending=False)
 
 
-def audit_monthly_ot(att_df: pd.DataFrame) -> pd.DataFrame:
-    """මාසෙකට OT පැය 60+ ගිය user-month combinations."""
+def audit_monthly_ot(att_df: pd.DataFrame, holidays: set | None = None) -> pd.DataFrame:
+    """මාසෙකට OT පැය 60+ ගිය user-month combinations (LEAVE/OFF skip, recomputed OT)."""
     if att_df.empty or "# OF OT HRS" not in att_df:
         return pd.DataFrame()
     recs = []
@@ -436,11 +466,12 @@ def audit_monthly_ot(att_df: pd.DataFrame) -> pd.DataFrame:
         d = _to_date(a.get("DATE"))
         if d is None:
             continue
+        otn, otd = row_ot_split(a.get(schema.A_WH), d, a.get("WORCK LOCATION"), holidays)
         recs.append({
             "USER ID": str(a.get("USER ID", "")).strip(),
             "USER NAME": a.get("USER NAME", ""),
             "MONTH": _month_key(d),
-            "OT": _f(a.get("# OF OT HRS")),
+            "OT": otn + otd,
         })
     if not recs:
         return pd.DataFrame()
@@ -494,7 +525,8 @@ def add_month_col(df: pd.DataFrame, date_col: str) -> pd.DataFrame:
 
 
 def monthly_user_summary(txn_df: pd.DataFrame, att_df: pd.DataFrame,
-                         month: str | None = None) -> pd.DataFrame:
+                         month: str | None = None,
+                         holidays: set | None = None) -> pd.DataFrame:
     """
     User × Month අනුව: Normal Rev, OT Rev, Total Revenue, Incentive, OT Hrs, Cost.
       Revenue  = REVANUE-NORMAL + REVANUE-OT-N + REVANUE-OT-D
@@ -542,7 +574,9 @@ def monthly_user_summary(txn_df: pd.DataFrame, att_df: pd.DataFrame,
             if not uid:
                 continue
             s = slot(uid, a.get("USER NAME", ""), mon)
-            s["OT HRS"] += _f(a.get(schema.A_OT))
+            otn_r, otd_r = row_ot_split(a.get(schema.A_WH), d,
+                                        a.get("WORCK LOCATION"), holidays)
+            s["OT HRS"] += otn_r + otd_r
 
     df = pd.DataFrame(list(recs.values()))
     if df.empty:
@@ -711,17 +745,15 @@ def _ot_split_and_days(att_df: pd.DataFrame, holidays: set, month: str):
             continue
         wh = _f(a.get(schema.A_WH))
         loc = str(a.get("WORCK LOCATION", "")).strip().upper()
-        sched = scheduled_hours(d, holidays)
         s = acc.setdefault(uid, {"days": set(), "otn": 0.0, "otd": 0.0})
         # LEAVE / OFF -> working day එකක් නෙවෙයි, OT එකක් නෙවෙයි
         if loc in NON_WORK_LOCATIONS:
             continue
         if wh > 0:
             s["days"].add(d.isoformat())
-        if sched <= 0:
-            s["otd"] += wh
-        else:
-            s["otn"] += max(wh - sched, 0.0)
+        otn_r, otd_r = row_ot_split(wh, d, loc, holidays)
+        s["otn"] += otn_r
+        s["otd"] += otd_r
     for uid in acc:
         acc[uid]["days"] = len(acc[uid]["days"])   # set -> දවස් ගණන
     return acc
@@ -893,17 +925,15 @@ def ot_report(att_df: pd.DataFrame, holidays: set, start=None, end=None):
         if is_non_work_location(a.get("WORCK LOCATION", "")):
             continue   # LEAVE / OFF -> working day නෙවෙයි
         wh = _f(a.get(schema.A_WH))
-        sched = scheduled_hours(d, holidays)
+        otn_r, otd_r = row_ot_split(wh, d, a.get("WORCK LOCATION"), holidays)
         rec = acc.setdefault(uid, {"name": a.get("USER NAME", ""), "days": 0,
                                    "otn": 0.0, "otd": 0.0})
         if not rec["name"]:
             rec["name"] = a.get("USER NAME", "")
         if wh > 0:
             rec["days"] += 1
-        if sched <= 0:
-            rec["otd"] += wh
-        else:
-            rec["otn"] += max(wh - sched, 0.0)
+        rec["otn"] += otn_r
+        rec["otd"] += otd_r
     rows = []
     for uid, r in acc.items():
         otn, otd = round(r["otn"], 2), round(r["otd"], 2)

@@ -98,6 +98,7 @@ _REQUIRED_CALC = [
     "top_users_revenue", "ot_report", "recompute_attendance_df",
     "recompute_transaction_df", "bulk_attendance_rows", "date_range_list",
     "data_audit_attendance", "fix_attendance_df", "data_audit_transaction",
+    "row_ot_split", "attendance_ot_total",
 ]
 _missing = [f for f in _REQUIRED_CALC if not hasattr(calc, f)]
 if not hasattr(gsheets, "upsert_rows"):
@@ -393,7 +394,7 @@ elif page == "🏠 Dashboard":
 
     total_rev = _rev_total(txn)
     total_inc = txn.get(schema.T_INCENTIVE, pd.Series(dtype=float)).apply(calc._f).sum() if not txn.empty else 0
-    total_ot = att.get(schema.A_OT, pd.Series(dtype=float)).apply(calc._f).sum() if not att.empty else 0
+    total_ot = calc.attendance_ot_total(att, _holidays_set())
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Transactions", f"{len(txn):,}")
@@ -428,8 +429,8 @@ elif page == "🏠 Dashboard":
         "20hr+ Cap": calc.audit_working_hours_cap(_att),
         "Holiday/Sunday": calc.audit_holiday_attendance(_att, _hol),
         "OT w/o Txn": calc.audit_ot_without_transaction(_att, _txn, _hol),
-        "Weekly OT 15+": calc.audit_weekly_ot(_att),
-        "Monthly OT 60+": calc.audit_monthly_ot(_att),
+        "Weekly OT 15+": calc.audit_weekly_ot(_att, _hol),
+        "Monthly OT 60+": calc.audit_monthly_ot(_att, _hol),
     }
     _counts = {k: len(v) for k, v in _checks.items() if not v.empty}
     _total = sum(_counts.values())
@@ -449,7 +450,7 @@ elif page == "🏠 Dashboard":
 
     st.divider()
     st.subheader("📅 Monthly — User level (OT / Revenue / Cost / Incentive)")
-    summ_all = calc.monthly_user_summary(txn, att)
+    summ_all = calc.monthly_user_summary(txn, att, holidays=_holidays_set())
     if summ_all.empty:
         st.info("No data yet. Add via 📝 Transaction / 🕐 Attendance.")
     else:
@@ -725,9 +726,13 @@ elif page == "🕐 Attendance":
     if _at.empty:
         st.info("No attendance this month.")
     else:
-        _wh = _at["# OF WORKING HRS"].apply(calc._f).sum() if "# OF WORKING HRS" in _at else 0
-        _ot = _at["# OF OT HRS"].apply(calc._f).sum() if "# OF OT HRS" in _at else 0
-        _leave = int((_at.get("WORCK LOCATION", pd.Series(dtype=str)).astype(str).str.upper() == "LEAVE").sum())
+        _hol = _holidays_set()
+        # OT recompute (ot_report එකට ගැළපෙන විදිහට, LEAVE/OFF skip)
+        _ot = calc.attendance_ot_total(_at, _hol)
+        # working hrs — LEAVE/OFF rows skip
+        _nonwork = _at.get("WORCK LOCATION", pd.Series(dtype=str)).astype(str).str.upper().isin(calc.NON_WORK_LOCATIONS)
+        _wh = _at.loc[~_nonwork, "# OF WORKING HRS"].apply(calc._f).sum() if "# OF WORKING HRS" in _at else 0
+        _leave = int((_at.get("WORCK LOCATION", pd.Series(dtype=str)).astype(str).str.upper().isin(["LEAVE", "OFF"])).sum())
         _pend = int((_at.get("APPROVAL STATUS", pd.Series(dtype=str)).astype(str).str.upper() == schema.APPR_PENDING).sum())
         s1, s2, s3, s4 = st.columns(4)
         s1.metric("Records", f"{len(_at):,}")
@@ -735,16 +740,21 @@ elif page == "🕐 Attendance":
         s3.metric("OT Hrs", f"{_ot:,.1f}")
         s4.metric("Pending", f"{_pend}")
         st.caption(f"This month ({calc.fmt_date(_t.replace(day=1))} – {calc.fmt_date(_t)}) · "
-                   f"Leave days: {_leave}")
+                   f"Leave/Off days: {_leave}")
 
-        # per-user working/OT summary
+        # per-user working/OT summary (consistent OT split)
         if "USER ID" in _at:
             _g = _at.copy()
-            _g["_w"] = _g["# OF WORKING HRS"].apply(calc._f)
-            _g["_o"] = _g["# OF OT HRS"].apply(calc._f)
+            _g["_w"] = _g.apply(lambda r: 0 if calc.is_non_work_location(r.get("WORCK LOCATION"))
+                                else calc._f(r.get("# OF WORKING HRS")), axis=1)
+            _g["_o"] = _g.apply(lambda r: sum(calc.row_ot_split(
+                r.get("# OF WORKING HRS"), r.get(schema.A_DATE),
+                r.get("WORCK LOCATION"), _hol)), axis=1)
             _by = _g.groupby(["USER ID", "USER NAME"]).agg(
                 Days=("USER ID", "size"), Working=("_w", "sum"), OT=("_o", "sum")
             ).reset_index().sort_values("OT", ascending=False)
+            _by["Working"] = _by["Working"].round(2)
+            _by["OT"] = _by["OT"].round(2)
             st.dataframe(_by, use_container_width=True, hide_index=True)
 
 
@@ -1154,7 +1164,7 @@ elif page == "🔍 Audit":
     # 4) Weekly OT > 15
     with tabs[3]:
         st.caption(f"Weekly # OF OT HRS > {schema.WEEKLY_OT_CAP}.")
-        d4 = calc.audit_weekly_ot(att)
+        d4 = calc.audit_weekly_ot(att, holidays)
         if d4.empty:
             st.success("✅ Weekly OT cap not exceeded.")
         else:
@@ -1164,7 +1174,7 @@ elif page == "🔍 Audit":
     # 5) Monthly OT > 60
     with tabs[4]:
         st.caption(f"Monthly # OF OT HRS > {schema.MONTHLY_OT_CAP}.")
-        d6 = calc.audit_monthly_ot(att)
+        d6 = calc.audit_monthly_ot(att, holidays)
         if d6.empty:
             st.success("✅ Monthly OT cap not exceeded.")
         else:
