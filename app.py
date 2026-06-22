@@ -382,6 +382,12 @@ elif page == "🏠 Dashboard":
         st.info("Create sheets from Setup first.")
         st.stop()
 
+    # මේ මාසේ 1 → අද දක්වා (OT Report එකට ගැළපෙන්න — future dates ගණන් ගන්නේ නෑ)
+    _today = dt.date.today()
+    _mstart = _today.replace(day=1)
+    txn = calc.filter_by_range(txn, schema.T_DATE, _mstart, _today)
+    att = calc.filter_by_range(att, schema.A_DATE, _mstart, _today)
+
     # computed totals (TOTAL REVANUE column එකක් save කරන්නේ නෑ — මෙතන ගණනය)
     def _rev_total(df):
         if df.empty:
@@ -461,16 +467,17 @@ elif page == "🏠 Dashboard":
         summ = summ_all[summ_all["MONTH"] == msel].drop(columns=["MONTH"])
 
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("OT Hrs", f'{summ["OT HRS"].sum():,.1f}')
-        m2.metric("Revenue", f'{summ["TOTAL REV"].sum():,.0f}')
-        m3.metric("Cost (Incentive)", f'{summ["COST"].sum():,.0f}')
-        m4.metric("Incentive", f'{summ["INCENTIVE"].sum():,.0f}')
+        m1.metric("OT Hrs", f'{summ["OT HRS"].sum():,.2f}')
+        m2.metric("Revenue", f'{summ["TOTAL REV"].sum():,.2f}')
+        m3.metric("Cost (Incentive)", f'{summ["COST"].sum():,.2f}')
+        m4.metric("Incentive", f'{summ["INCENTIVE"].sum():,.2f}')
 
-        st.dataframe(
-            summ[["USER ID", "USER NAME", "OT HRS", "NORMAL REV", "OT REV",
-                  "TOTAL REV", "INCENTIVE", "COST"]],
-            use_container_width=True, hide_index=True,
-        )
+        _dcols = ["USER ID", "USER NAME", "OT HRS", "NORMAL REV", "OT REV",
+                  "TOTAL REV", "INCENTIVE", "COST"]
+        _dfmt = {c: "{:.2f}" for c in ["OT HRS", "NORMAL REV", "OT REV",
+                                       "TOTAL REV", "INCENTIVE", "COST"]}
+        st.dataframe(summ[_dcols].style.format(_dfmt),
+                     use_container_width=True, hide_index=True)
 
 
 # ═══════════════════════════ METERS (analog) ═══════════════════════════
@@ -755,7 +762,8 @@ elif page == "🕐 Attendance":
             ).reset_index().sort_values("OT", ascending=False)
             _by["Working"] = _by["Working"].round(2)
             _by["OT"] = _by["OT"].round(2)
-            st.dataframe(_by, use_container_width=True, hide_index=True)
+            st.dataframe(_by.style.format({"Working": "{:.2f}", "OT": "{:.2f}"}),
+                         use_container_width=True, hide_index=True)
 
 
 # ═══════════════════════════ OT APPROVAL ═══════════════════════════
@@ -980,16 +988,18 @@ elif page == "🕒 OT Report":
         st.info("No OT data for this range.")
     else:
         t1, t2, t3 = st.columns(3)
-        t1.metric("Total OT Hrs", f'{rep["TOTAL OT HRS"].sum():,.1f}')
-        t2.metric("OT-N", f'{rep["OT-N HRS"].sum():,.1f}')
-        t3.metric("OT-D", f'{rep["OT-D HRS"].sum():,.1f}')
+        t1.metric("Total OT Hrs", f'{rep["TOTAL OT HRS"].sum():,.2f}')
+        t2.metric("OT-N", f'{rep["OT-N HRS"].sum():,.2f}')
+        t3.metric("OT-D", f'{rep["OT-D HRS"].sum():,.2f}')
 
         # monthly cap 60 ඉක්මෙව්ව ඒවා රතුවෙන්
         def _c(row):
             over = calc._f(row["TOTAL OT HRS"]) > schema.MONTHLY_OT_CAP
             bg = "#3a1d1d" if over else "transparent"
             return [f"background-color:{bg};color:#e8eaed"] * len(row)
-        st.dataframe(rep.style.apply(_c, axis=1), use_container_width=True, hide_index=True)
+        _otfmt = {c: "{:.2f}" for c in ["OT-N HRS", "OT-D HRS", "TOTAL OT HRS"] if c in rep.columns}
+        st.dataframe(rep.style.apply(_c, axis=1).format(_otfmt),
+                     use_container_width=True, hide_index=True)
         st.caption(f"🔴 Red = exceeded monthly OT cap ({schema.MONTHLY_OT_CAP}h).")
 
         st.bar_chart(rep.set_index("USER NAME")["TOTAL OT HRS"], color="#ffb454")
