@@ -1399,7 +1399,8 @@ elif page == "🛡️ Admin":
         st.warning("This page is admins only. Login with the PIN via 🔑 Admin login in the sidebar.")
         st.stop()
 
-    a1, a2, a3 = st.tabs(["✅ Attendance Approvals", "👥 Bulk Mark", "📅 Holiday Setup"])
+    a1, a2, a3, a4 = st.tabs(["✅ Attendance Approvals", "👥 Bulk Mark",
+                              "📅 Holiday Setup", "🗑️ Data Reset"])
 
     # ── Pending attendance approvals ──
     with a1:
@@ -1509,6 +1510,68 @@ elif page == "🛡️ Admin":
         st.caption(f"⚙️ Rules: daily cap {schema.WORKING_HRS_CAP}h · weekly OT cap "
                    f"{schema.WEEKLY_OT_CAP}h · complaint penalty {schema.COMPLAINT_PENALTY} · "
                    f"schedule (Mon–Fri 8h, Sat 5h, Sun 0h). Change these in schema.py.")
+
+    # ── Data Reset (full backup -> clear) ──
+    with a4:
+        st.subheader("🗑️ Data Reset")
+        st.caption("Download a full backup of every sheet, then clear data to start fresh. "
+                   "Headers are kept; only the rows are removed.")
+
+        DATA_SHEETS = ["TRANSACTION", "ATTANDANCE", "OT APPROVAL",
+                       "CUSTOMMER COMPLAINT", "KPI UPDATE", "INSENTIVE"]
+        MASTER_SHEETS = [k for k in schema.SHEETS if k not in DATA_SHEETS]
+
+        # 1) Full backup download (ALL sheets, one tab each)
+        st.markdown("**1️⃣ Full database backup** (recommended before reset)")
+        import io
+        if st.button("⬇️ Prepare full backup (Excel)"):
+            buf = io.BytesIO()
+            with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+                for key in schema.SHEETS:
+                    try:
+                        d = gsheets.get_df(key)
+                    except Exception:
+                        d = pd.DataFrame(columns=schema.SHEETS[key]["headers"])
+                    # Excel sheet name <= 31 chars
+                    d.to_excel(xw, sheet_name=key[:31], index=False)
+            st.session_state["_backup_bytes"] = buf.getvalue()
+            st.success("Backup ready — download below.")
+        if st.session_state.get("_backup_bytes"):
+            st.download_button(
+                "💾 Download full_backup.xlsx", st.session_state["_backup_bytes"],
+                file_name=f"kpi_full_backup_{dt.date.today().isoformat()}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+        st.divider()
+        # 2) Reset scope
+        st.markdown("**2️⃣ Reset scope**")
+        scope = st.radio(
+            "Which sheets to clear?",
+            ["Transactional data only (keep masters: users, salary, T-codes, holidays)",
+             "EVERYTHING (incl. masters — full wipe)"],
+            index=0)
+        targets = DATA_SHEETS if scope.startswith("Transactional") else list(schema.SHEETS)
+        st.caption("Will clear: " + ", ".join(targets))
+
+        # 3) Confirmation
+        st.markdown("**3️⃣ Confirm** — this **cannot be undone** (restore only from your backup).")
+        confirm_txt = st.text_input('Type **RESET** to confirm', key="reset_confirm")
+        ack = st.checkbox("I have downloaded a backup and understand this deletes data.")
+        if st.button("🗑️ Reset data now", type="primary"):
+            if confirm_txt.strip().upper() != "RESET":
+                st.error("Type RESET to confirm.")
+            elif not ack:
+                st.error("Tick the acknowledgement box first.")
+            else:
+                cleared = []
+                for key in targets:
+                    empty = pd.DataFrame(columns=schema.SHEETS[key]["headers"])
+                    gsheets.overwrite(key, empty)
+                    cleared.append(key)
+                st.session_state.pop("_backup_bytes", None)
+                st.success(f"✅ Reset complete — cleared {len(cleared)} sheet(s): "
+                           + ", ".join(cleared))
+                st.cache_data.clear()
 
 
 # ═══════════════════════════ DATA MANAGER ═══════════════════════════
