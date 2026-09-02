@@ -32,42 +32,117 @@ from parsing import clean, to_num, fmt_num
 st.set_page_config(page_title="ASN ↔ GRN Control System",
                    page_icon="📦", layout="wide")
 
-# ───────────────────────────── styling ─────────────────────────────
-st.markdown("""
+# ───────────────────────────── design system ─────────────────────────────
+INK = "#101720"
+MUTED = "#67717e"
+LINE = "#e4e8ed"
+ACCENT = "#0d6e63"
+OK = "#17794a"
+WARN = "#a5670c"
+DANGER = "#b3261e"
+INFO = "#2d5f9a"
+
+st.markdown(f"""
 <style>
-  .block-container {padding-top: 1.6rem; max-width: 1500px;}
-  h1, h2, h3 {letter-spacing: -.01em;}
-  .hero {background:#16232e; color:#e8eef3; padding:16px 20px; border-radius:10px;
-         margin-bottom:14px; border-left:5px solid #4bb3a2;}
-  .hero .t {font-size:1.15rem; font-weight:700;}
-  .hero .s {font-size:.82rem; opacity:.72; margin-top:2px;}
-  .pill {display:inline-block; padding:2px 10px; border-radius:11px;
-         font-size:.74rem; font-weight:600; color:#fff;}
-  .kpi {background:#f6f8fa; border:1px solid #e3e8ee; border-radius:9px;
-        padding:12px 14px;}
-  .kpi .v {font-size:1.55rem; font-weight:700; line-height:1.1;}
-  .kpi .l {font-size:.74rem; text-transform:none; color:#5d6b7a; margin-top:2px;}
-  .stDataFrame {font-size:.84rem;}
-  section[data-testid="stSidebar"] {background:#111c25;}
-  section[data-testid="stSidebar"] * {color:#dbe4ea;}
-  div[data-testid="stMetricValue"] {font-size:1.5rem;}
+  .block-container {{padding-top: 2.2rem; padding-bottom: 3rem; max-width: 1440px;}}
+  html, body, [class*="css"] {{
+    font-feature-settings: "tnum" 1, "cv05" 1;
+  }}
+  h1,h2,h3,h4 {{color:{INK}; letter-spacing:-.015em; font-weight:650;}}
+
+  /* page header */
+  .ph {{margin:0 0 1.4rem 0; padding-bottom:.85rem; border-bottom:1px solid {LINE};}}
+  .ph .t {{font-size:1.42rem; font-weight:650; color:{INK}; line-height:1.2;}}
+  .ph .s {{font-size:.86rem; color:{MUTED}; margin-top:.28rem;}}
+
+  /* metric card */
+  .kc {{background:#fff; border:1px solid {LINE}; border-radius:10px;
+        padding:.95rem 1.05rem; height:100%;}}
+  .kc .v {{font-size:1.72rem; font-weight:650; line-height:1.1; color:{INK};
+           font-variant-numeric:tabular-nums;}}
+  .kc .l {{font-size:.79rem; color:{MUTED}; margin-top:.3rem;}}
+  .kc .n {{font-size:.72rem; color:{MUTED}; margin-top:.45rem; opacity:.85;}}
+
+  /* status pill — tinted, not saturated */
+  .pill {{display:inline-block; padding:.16rem .58rem; border-radius:6px;
+          font-size:.755rem; font-weight:600; border:1px solid;}}
+
+  /* pipeline strip */
+  .pipe {{display:flex; gap:6px; margin:.2rem 0 1rem 0;}}
+  .pipe .seg {{flex:1; background:#fff; border:1px solid {LINE};
+               border-radius:8px; padding:.7rem .85rem;}}
+  .pipe .seg .n {{font-size:1.35rem; font-weight:650; color:{INK};
+                  font-variant-numeric:tabular-nums;}}
+  .pipe .seg .c {{font-size:.75rem; color:{MUTED}; margin-top:.15rem;}}
+  .pipe .seg .bar {{height:3px; border-radius:2px; margin-top:.6rem;}}
+
+  /* tables */
+  .stDataFrame {{font-size:.83rem;}}
+  div[data-testid="stDataFrame"] {{border:1px solid {LINE}; border-radius:9px;}}
+
+  /* sidebar */
+  section[data-testid="stSidebar"] {{background:#0f1720; border-right:1px solid #1c2531;}}
+  section[data-testid="stSidebar"] * {{color:#d5dbe2;}}
+  section[data-testid="stSidebar"] h3 {{color:#fff; font-size:1rem;}}
+
+  /* buttons */
+  .stButton>button {{border-radius:8px; font-weight:550;}}
+  .stDownloadButton>button {{border-radius:8px;}}
+
+  /* tabs */
+  button[data-baseweb="tab"] {{font-size:.87rem;}}
+
+  .hint {{font-size:.79rem; color:{MUTED};}}
+  hr {{border-color:{LINE};}}
 </style>
 """, unsafe_allow_html=True)
 
 
 def hero(title: str, sub: str = ""):
-    st.markdown(f'<div class="hero"><div class="t">{title}</div>'
+    st.markdown(f'<div class="ph"><div class="t">{title}</div>'
                 f'<div class="s">{sub}</div></div>', unsafe_allow_html=True)
 
 
-def kpi(col, value, label, color="#16232e"):
-    col.markdown(f'<div class="kpi"><div class="v" style="color:{color}">{value}</div>'
-                 f'<div class="l">{label}</div></div>', unsafe_allow_html=True)
+def kpi(col, value, label, color=INK, note=""):
+    col.markdown(
+        f'<div class="kc"><div class="v" style="color:{color}">{value}</div>'
+        f'<div class="l">{label}</div>'
+        + (f'<div class="n">{note}</div>' if note else "")
+        + '</div>', unsafe_allow_html=True)
+
+
+def _tint(hexcol: str, alpha: str = "14") -> str:
+    return hexcol + alpha
 
 
 def pill(text: str) -> str:
-    c = schema.STATUS_COLORS.get(text, "#6b7785")
-    return f'<span class="pill" style="background:{c}">{text}</span>'
+    c = schema.STATUS_COLORS.get(text, MUTED)
+    return (f'<span class="pill" style="color:{c};border-color:{c}55;'
+            f'background:{_tint(c)}">{text}</span>')
+
+
+def pipeline(stages: list[tuple[str, int, str]]):
+    """[(label, value, color)] -> horizontal stage strip."""
+    segs = "".join(
+        f'<div class="seg"><div class="n">{v}</div><div class="c">{lab}</div>'
+        f'<div class="bar" style="background:{c}"></div></div>'
+        for lab, v, c in stages)
+    st.markdown(f'<div class="pipe">{segs}</div>', unsafe_allow_html=True)
+
+
+def fig_style(fig, height=300, legend=False):
+    fig.update_layout(
+        template="simple_white", height=height,
+        margin=dict(t=8, b=8, l=8, r=8),
+        font=dict(family="system-ui, -apple-system, Segoe UI, sans-serif",
+                  size=12, color=INK),
+        showlegend=legend,
+        legend=dict(orientation="h", y=1.12, x=0, title_text=""),
+        xaxis=dict(showgrid=False, zeroline=False),
+        yaxis=dict(showgrid=True, gridcolor=LINE, zeroline=False),
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+    )
+    return fig
 
 
 # ───────────────────────────── session ─────────────────────────────
@@ -107,6 +182,7 @@ st.sidebar.markdown("### 📦 ASN ↔ GRN Control")
 st.sidebar.caption("Korber One · AX · EFL Warehouse")
 
 try:
+    _new_tabs = gsheets.ensure_missing_once()
     _users = gsheets.get_df("USER-M")
 except Exception as e:
     st.sidebar.error("Google Sheets connect කරන්න බැරි උනා.")
@@ -130,157 +206,271 @@ with st.sidebar.expander("🔑 Admin"):
 if SS["role"] == "admin":
     st.sidebar.success("🛡️ Admin mode")
 
+if _new_tabs:
+    st.sidebar.info("🏗️ අලුතෙන් හැදුවා: " + ", ".join(_new_tabs))
+
 PAGES = ["📊 Dashboard", "📤 ASN Upload", "📦 Inventory", "🔄 Reconciliation",
          "🧾 ASN Register", "🔍 Search", "⚠️ Discrepancy", "✉️ Email", "✅ AX GRN",
-         "🖼️ ASN Images", "⚙️ Setup", "🗂️ Data Manager", "🧹 Maintenance"]
+         "🖼️ Attachments", "⚙️ Setup", "🗂️ Data Manager", "🧹 Maintenance"]
 page = st.sidebar.radio("Menu", PAGES, label_visibility="collapsed")
 
 st.sidebar.markdown("---")
-if st.sidebar.button("🔄 Cache clear"):
+_st = gsheets.api_stats()
+_bar = "#b3261e" if _st["last_minute"] > _st["limit"] * .8 else "#4bb3a2"
+st.sidebar.markdown(
+    f"<div style='font-size:.75rem;opacity:.75'>API "
+    f"<span style='color:{_bar}'>{_st['last_minute']}/{_st['limit']}</span> per min"
+    + (f" · {_st['retries']} retries" if _st["retries"] else "")
+    + (f" · {_st['errors']} errors" if _st["errors"] else "")
+    + "</div>", unsafe_allow_html=True)
+
+if st.sidebar.button("Refresh data"):
     gsheets.refresh()
     st.rerun()
 _url = gsheets.spreadsheet_url()
 if _url:
-    st.sidebar.markdown(f"[📗 Google Sheet විවෘත කරන්න]({_url})")
+    st.sidebar.markdown(
+        f"<div style='font-size:.75rem;margin-top:.4rem'>"
+        f"<a href='{_url}' target='_blank'>Google Sheet විවෘත කරන්න</a></div>",
+        unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════════════════════════
 #  ⚙️ SETUP
 # ═══════════════════════════════════════════════════════════════════
 if page == "⚙️ Setup":
-    hero("⚙️ Setup", "අවශ්‍ය හැම Google Sheet tab එකක්ම auto-create + system settings")
+    hero("Setup", "Sheets · matching rules · attachments · API")
 
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        if st.button("🏗️ හැම Sheet එකක්ම හදන්න / update කරන්න", type="primary"):
-            with st.spinner("Sheets හදනවා..."):
-                created, patched = gsheets.ensure_all()
-            if created:
-                st.success("අලුතෙන් හැදුවා: " + ", ".join(created))
-            if patched:
-                st.info("Header update කළා: " + ", ".join(patched))
-            if not created and not patched:
-                st.success("ඔක්කොම sheets දැනටමත් හරි ✅")
-    with c2:
-        st.caption("මේක ඔබාම `ASN_SUMMARY`, `ASN_DETAIL`, `INVENTORY`, `DISCREPANCY`, "
-                   "`AX_GRN`, `ASN_IMAGES`, `RECON_LOG`, `EMAIL_LOG`, `USER-M`, "
-                   "`SETTINGS` කියන tabs ඔක්කොම හැදෙනවා.")
+    t_sheets, t_rules, t_files, t_api = st.tabs(
+        ["Sheets", "Matching rules", "Attachments", "API & quota"])
 
-    st.markdown("#### Sheet status")
-    show(gsheets.sheet_status())
+    # ───────────── sheets ─────────────
+    with t_sheets:
+        c1, c2 = st.columns([1, 2])
+        with c1:
+            if st.button("හැම sheet එකක්ම හදන්න / update", type="primary"):
+                with st.spinner("Sheets හදනවා..."):
+                    created, patched = gsheets.ensure_all()
+                if created:
+                    st.success("අලුතෙන් හැදුවා: " + ", ".join(created))
+                if patched:
+                    st.info("Header update කළා: " + ", ".join(patched))
+                if not created and not patched:
+                    st.success("ඔක්කොම sheets දැනටමත් හරි")
+        with c2:
+            st.caption("`ASN_SUMMARY`, `ASN_DETAIL`, `INVENTORY`, `DISCREPANCY`, "
+                       "`AX_GRN`, `ASN_IMAGES`, `IMAGE_DATA`, `RECON_LOG`, "
+                       "`EMAIL_LOG`, `USER-M`, `SETTINGS` — ඔක්කොම auto-create වෙනවා. "
+                       "ලියද්දී නැති sheet එකකුත් තනියම හැදෙනවා.")
+        show(gsheets.sheet_status())
 
-    st.markdown("---")
-    st.markdown("#### ⚙️ Matching settings")
     s = gsheets.settings_dict()
-    with st.form("settings"):
-        a, b, c = st.columns(3)
-        s["CLIENT_CODE"] = a.text_input("Client code", s.get("CLIENT_CODE", "HIES"))
-        s["SITE"] = b.text_input("Site / Warehouse", s.get("SITE", "EGDC"))
-        s["COMPANY"] = c.text_input("Company", s.get("COMPANY", "EFL"))
 
-        a, b, c, d = st.columns(4)
-        s["QTY_TOLERANCE"] = str(a.number_input(
-            "Qty tolerance", value=gsheets.setting_float(s, "QTY_TOLERANCE"), step=1.0))
-        s["STRIP_CLIENT_PREFIX"] = "Y" if b.checkbox(
-            "Client prefix ඉවත් කරන්න", gsheets.setting_bool(s, "STRIP_CLIENT_PREFIX")) else "N"
-        s["CHECK_ITEM"] = "Y" if c.checkbox(
-            "Item check", gsheets.setting_bool(s, "CHECK_ITEM")) else "N"
-        s["CHECK_LOT"] = "Y" if d.checkbox(
-            "Lot check", gsheets.setting_bool(s, "CHECK_LOT")) else "N"
+    # ───────────── matching rules ─────────────
+    with t_rules:
+        with st.form("settings_rules"):
+            a, b, c = st.columns(3)
+            s["CLIENT_CODE"] = a.text_input("Client code", s.get("CLIENT_CODE", "HIES"))
+            s["SITE"] = b.text_input("Site / warehouse", s.get("SITE", "EGDC"))
+            s["COMPANY"] = c.text_input("Company", s.get("COMPANY", "EFL"))
 
-        a, b = st.columns(2)
-        s["CHECK_ASN_NO"] = "Y" if a.checkbox(
-            "ASN number check", gsheets.setting_bool(s, "CHECK_ASN_NO")) else "N"
-        s["FLAG_EXTRA"] = "Y" if b.checkbox(
-            "Extra HU flag කරන්න", gsheets.setting_bool(s, "FLAG_EXTRA")) else "N"
+            a, b, c, d = st.columns(4)
+            s["QTY_TOLERANCE"] = str(a.number_input(
+                "Qty tolerance", value=gsheets.setting_float(s, "QTY_TOLERANCE"),
+                step=1.0))
+            s["STRIP_CLIENT_PREFIX"] = "Y" if b.checkbox(
+                "Client prefix ඉවත්", gsheets.setting_bool(s, "STRIP_CLIENT_PREFIX")) else "N"
+            s["CHECK_ITEM"] = "Y" if c.checkbox(
+                "Item check", gsheets.setting_bool(s, "CHECK_ITEM")) else "N"
+            s["CHECK_LOT"] = "Y" if d.checkbox(
+                "Lot check", gsheets.setting_bool(s, "CHECK_LOT")) else "N"
 
-        a, b = st.columns(2)
-        s["EMAIL_TO"] = a.text_input("Email To", s.get("EMAIL_TO", ""))
-        s["EMAIL_CC"] = b.text_input("Email Cc", s.get("EMAIL_CC", ""))
+            a, b = st.columns(2)
+            s["CHECK_ASN_NO"] = "Y" if a.checkbox(
+                "ASN number check", gsheets.setting_bool(s, "CHECK_ASN_NO")) else "N"
+            s["FLAG_EXTRA"] = "Y" if b.checkbox(
+                "Extra HU flag", gsheets.setting_bool(s, "FLAG_EXTRA")) else "N"
 
-        st.markdown("**🖼️ Image storage**")
+            a, b = st.columns(2)
+            s["EMAIL_TO"] = a.text_input("Email To", s.get("EMAIL_TO", ""))
+            s["EMAIL_CC"] = b.text_input("Email Cc", s.get("EMAIL_CC", ""))
+            s["ADMIN_PIN"] = st.text_input("Admin PIN", s.get("ADMIN_PIN", "1234"))
+
+            if st.form_submit_button("Save", type="primary"):
+                gsheets.save_settings(s)
+                st.success("Save කළා")
+
+    # ───────────── attachments ─────────────
+    with t_files:
+        st.markdown("###### Images සහ PDF කොහෙද save වෙනවද")
         a, b, c = st.columns(3)
         s["IMAGE_STORAGE"] = a.selectbox(
-            "Save කරන තැන", ["SHEET", "DRIVE"],
-            index=0 if str(s.get("IMAGE_STORAGE", "SHEET")).upper() != "DRIVE" else 1,
-            help="SHEET = Google Sheet එකේම (safe, quota ප්‍රශ්න නෑ). "
-                 "DRIVE = Drive folder එකට (folder එක share කරලා තියෙන්න ඕනේ).")
+            "Storage", ["DRIVE", "SHEET"],
+            index=0 if str(s.get("IMAGE_STORAGE", "DRIVE")).upper() == "DRIVE" else 1,
+            help="DRIVE = Drive folder එකට (fail වුණොත් automatic ව Sheet එකට). "
+                 "SHEET = Google Sheet එකේම, quota ප්‍රශ්න නෑ.")
         s["IMAGE_MAX_PX"] = str(int(b.number_input(
             "Max px", value=gsheets.setting_float(s, "IMAGE_MAX_PX", 1400),
             min_value=400.0, max_value=4000.0, step=100.0)))
         s["IMAGE_QUALITY"] = str(int(c.number_input(
             "JPEG quality", value=gsheets.setting_float(s, "IMAGE_QUALITY", 78),
             min_value=40.0, max_value=95.0, step=1.0)))
+
         s["DRIVE_FOLDER_ID"] = st.text_input(
-            "Drive folder ID (DRIVE mode එකට විතරයි)", s.get("DRIVE_FOLDER_ID", ""),
-            help="Drive folder එකක් හදලා service account එකට Editor විදිහට share කරලා ID එක දාන්න.")
-        s["ADMIN_PIN"] = st.text_input("Admin PIN", s.get("ADMIN_PIN", "1234"))
+            "Drive folder — link එකක් හෝ ID එකක්", s.get("DRIVE_FOLDER_ID", ""))
+        fid = drive.folder_id(s["DRIVE_FOLDER_ID"])
+        if fid:
+            st.caption(f"Folder ID: `{fid}`")
 
-        if st.form_submit_button("💾 Settings save", type="primary"):
+        c1, c2 = st.columns([1, 3])
+        if c1.button("Save", type="primary", key="save_files"):
             gsheets.save_settings(s)
-            st.success("Save කළා ✅")
+            st.success("Save කළා")
+        if c2.button("Drive connection test"):
+            ok, msg = drive.check_folder(s["DRIVE_FOLDER_ID"])
+            st.success(msg) if ok else st.error(msg)
 
-    st.markdown("---")
-    _mode = str(gsheets.settings_dict().get("IMAGE_STORAGE", "SHEET")).upper()
-    if _mode == "DRIVE":
-        st.caption(f"🖼️ Image storage: **DRIVE** · Drive API: "
-                   f"{'✅ ready' if drive.available() else '⚠️ google-api-python-client නෑ'} "
-                   f"· fail වුණොත් automatic ව Sheet එකට save වෙනවා.")
-    else:
-        st.caption("🖼️ Image storage: **SHEET** — images compress කරලා `IMAGE_DATA` "
-                   "sheet එකේම save වෙනවා. Drive quota ප්‍රශ්න නෑ.")
+        st.markdown("---")
+        st.markdown("###### Service account")
+        sa = drive.service_email()
+        st.code(sa or "(secrets එකේ නෑ)", language="text")
+        st.caption("Drive folder එකට **Editor** විදිහට මේ email එක share කරන්න ඕනේ. "
+                   "Service account එකකට තමන්ගේ storage quota නෑ — folder එක "
+                   "**Shared Drive** එකක තියෙනවා නම් හොඳම. Upload fail වුණොත් "
+                   "attachment එක automatic ව Google Sheet එකට යනවා, නැති වෙන්නේ නෑ.")
+        st.caption(f"Drive API: {'ready' if drive.available() else 'google-api-python-client නෑ'}"
+                   f" · PDF: {'ready' if parsing.pdf_available() else 'pdfplumber නෑ'}")
+
+    # ───────────── API ─────────────
+    with t_api:
+        st.markdown("###### Google API usage")
+        st.caption("Google Sheets API එකේ සීමාව විනාඩියකට request 60ක්. මේ system එක "
+                   "ඒක track කරලා, ළං වුණාම තනියම රැඳිලා, quota error එකක් ආවොත් "
+                   "exponential backoff එකෙන් retry කරනවා.")
+
+        stt = gsheets.api_stats()
+        a, b, c, d = st.columns(4)
+        used = stt["last_minute"]
+        kpi(a, f'{used}/{stt["limit"]}', "Calls last minute",
+            DANGER if used > stt["limit"] * .8 else ACCENT,
+            f'headroom {stt["headroom"]}')
+        kpi(b, stt["calls"], "Total calls", note=f'last {stt["last_call"] or "—"}')
+        kpi(c, stt["retries"], "Retries", WARN if stt["retries"] else INK,
+            f'throttled {stt["throttled"]}')
+        kpi(d, stt["errors"], "Errors", DANGER if stt["errors"] else OK)
+
+        if stt["last_error"]:
+            st.error(f"Last error — {stt['last_error']}")
+
+        st.markdown("###### Tuning")
+        with st.form("api_form"):
+            a, b = st.columns(2)
+            rate = a.number_input(
+                "Rate limit — calls / minute",
+                value=gsheets.setting_float(s, "API_RATE_LIMIT", 55),
+                min_value=10.0, max_value=60.0, step=5.0,
+                help="Google limit 60. පහළින් තියාගන්න එක ආරක්ෂිතයි.")
+            ttl = b.number_input(
+                "Cache TTL — තත්පර",
+                value=gsheets.setting_float(s, "CACHE_TTL", 90),
+                min_value=10.0, max_value=600.0, step=10.0,
+                help="ලොකු නම් API calls අඩුයි, ඒත් data ටිකක් පරණයි.")
+            if st.form_submit_button("Save", type="primary"):
+                s["API_RATE_LIMIT"] = str(int(rate))
+                s["CACHE_TTL"] = str(int(ttl))
+                gsheets.save_settings(s)
+                gsheets.apply_api_settings(s)
+                st.success("Save කළා")
+
+        c1, c2 = st.columns(2)
+        if c1.button("Cache clear"):
+            gsheets.refresh()
+            st.success("Cache clear කළා")
+        if c2.button("Counters reset"):
+            gsheets.api_reset_stats()
+            st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════════
 #  📤 ASN UPLOAD
 # ═══════════════════════════════════════════════════════════════════
 elif page == "📤 ASN Upload":
-    hero("📤 ASN Document Upload",
-         "Excel එක upload කරලා → Sheet එක තෝරලා → confirm කරලා → Summary + Details save")
+    hero("ASN Document Upload",
+         "Excel හෝ PDF → source එක තෝරලා confirm → Summary + Details save")
 
     if not SS["user"]:
         st.warning("Sidebar එකෙන් Operator නම තෝරන්න.")
 
-    files = st.file_uploader("ASN Excel file(s)", type=["xlsx", "xlsm", "xls"],
+    if not parsing.pdf_available():
+        st.caption("ℹ️ PDF support එකට `pdfplumber` install කරන්න ඕනේ "
+                   "(`requirements.txt` එකේ තියෙනවා).")
+
+    files = st.file_uploader("ASN file(s) — Excel හෝ PDF",
+                             type=["xlsx", "xlsm", "xls", "pdf"],
                              accept_multiple_files=True, key="asn_up")
 
     if files:
-        st.markdown("### 1️⃣ Sheet එක තෝරන්න")
-        st.caption("File එකේ තියෙන sheets වලින් ASN data තියෙන එක තෝරලා parse කරන්න.")
+        st.markdown("##### 1 · Source එක තෝරන්න")
+        st.caption("Excel නම් sheet එක, PDF නම් table එක තෝරලා parse කරන්න.")
 
         choices = {}
         for f in files:
             b = f.getvalue()
-            sheets = parsing.list_sheets(b)
-            if not sheets:
-                st.error(f"`{f.name}` — Excel sheet කියවන්න බැරි උනා.")
-                continue
-            c1, c2 = st.columns([2, 3])
-            c1.markdown(f"**📄 {f.name}**")
-            sel = c2.selectbox(f"Sheet — {f.name}", sheets, key=f"sh_{f.name}",
-                               label_visibility="collapsed")
-            choices[f.name] = (b, sel)
+            if parsing.is_pdf(f.name, b):
+                tables = parsing.list_pdf_tables(b)
+                c1, c2 = st.columns([2, 3])
+                c1.markdown(f"**📕 {f.name}**")
+                c1.caption(f"PDF · pages {parsing.pdf_page_count(b)}")
+                if not tables:
+                    c2.error("Table එකක් හම්බුණේ නෑ — scan කරපු PDF එකක් වෙන්න ඇති. "
+                             "Excel එකක් දාන්න, නැත්නම් 🖼️ ASN Images page එකෙන් "
+                             "මේ PDF එක document එකක් විදිහට attach කරන්න.")
+                    continue
+                labels = [t["label"] for t in tables]
+                sel = c2.selectbox(f"Table — {f.name}", labels, key=f"pt_{f.name}",
+                                   label_visibility="collapsed")
+                keys = [t["key"] for t in tables if t["label"] == sel]
+                choices[f.name] = ("pdf", b, keys)
+            else:
+                sheets = parsing.list_sheets(b)
+                if not sheets:
+                    st.error(f"`{f.name}` — Excel sheet කියවන්න බැරි උනා.")
+                    continue
+                c1, c2 = st.columns([2, 3])
+                c1.markdown(f"**📗 {f.name}**")
+                c1.caption(f"Excel · sheets {len(sheets)}")
+                sel = c2.selectbox(f"Sheet — {f.name}", sheets, key=f"sh_{f.name}",
+                                   label_visibility="collapsed")
+                choices[f.name] = ("xlsx", b, sel)
 
-        if st.button("🔍 Parse & Preview", type="primary"):
+        if st.button("Parse & preview", type="primary", disabled=not choices):
             SS["parsed_asn"] = {}
-            for fname, (b, sheet) in choices.items():
-                df, meta = parsing.parse_asn(b, sheet)
-                imgs = parsing.extract_images(b)
+            for fname, (kind, b, sel) in choices.items():
+                if kind == "pdf":
+                    df, meta = parsing.parse_asn_pdf(b, sel)
+                    imgs = parsing.extract_pdf_images(b)
+                    src = meta.get("sheet", "PDF")
+                else:
+                    df, meta = parsing.parse_asn(b, sel)
+                    imgs = parsing.extract_images(b)
+                    src = sel
                 SS["parsed_asn"][fname] = {"df": df, "meta": meta, "images": imgs,
-                                           "sheet": sheet}
+                                           "sheet": src, "kind": kind,
+                                           "raw": b if kind == "pdf" else None}
             st.rerun()
 
     # ── preview + confirm ──
     if SS["parsed_asn"]:
         st.markdown("---")
-        st.markdown("### 2️⃣ Preview & Confirm")
+        st.markdown("##### 2 · Preview & confirm")
 
         total_rows = 0
         all_ok = True
         for fname, p in SS["parsed_asn"].items():
             df, meta = p["df"], p["meta"]
-            with st.expander(f"📄 {fname}  ·  sheet: `{p['sheet']}`  ·  "
-                             f"{len(df)} lines  ·  🖼️ {len(p['images'])} image(s)",
+            icon = "📕" if p.get("kind") == "pdf" else "📗"
+            with st.expander(f"{icon} {fname}  ·  {p['sheet']}  ·  "
+                             f"{len(df)} lines  ·  {len(p['images'])} image(s)",
                              expanded=True):
                 if meta.get("error"):
                     st.error(meta["error"])
@@ -291,23 +481,24 @@ elif page == "📤 ASN Upload":
                 a, b, c, d = st.columns(4)
                 kpi(a, len(df), "ASN lines")
                 kpi(b, df["HU_ID"].astype(str).str.strip().nunique(), "HU / Pallet")
-                kpi(c, fmt_num(df["QTY"].map(to_num).sum()), "Total Qty")
+                kpi(c, fmt_num(df["QTY"].map(to_num).sum()), "Total qty")
                 kpi(d, len(asns), "ASN number(s)")
                 st.caption("ASN: " + ", ".join(f"`{x}`" for x in asns[:8]))
-                st.caption(f"Header row: {meta['header_row']}  ·  "
-                           f"Mapped columns: {len(meta['mapped'])}")
+                st.caption(f"Header at {meta['header_row']} · "
+                           f"mapped columns {len(meta['mapped'])}")
                 if meta["unmapped"]:
-                    st.caption("⚠️ Map නොවුණ columns (skip වෙනවා): " +
+                    st.caption("Map නොවුණ columns (skip වෙනවා): " +
                                ", ".join(meta["unmapped"][:12]))
                 show(df.head(50))
                 if p["images"]:
-                    st.caption(f"Excel එක ඇතුළේ images {len(p['images'])}ක් හම්බුණා:")
+                    st.caption(f"File එක ඇතුළේ images {len(p['images'])}ක්:")
                     cols = st.columns(min(5, len(p["images"])))
                     for i, im in enumerate(p["images"][:5]):
-                        cols[i].image(im["data"], caption=f"{im['name']} ({im['size_kb']}KB)",
+                        cols[i].image(im["data"],
+                                      caption=f"{im['name']} ({im['size_kb']}KB)",
                                       width="stretch")
 
-        st.markdown("### 3️⃣ Extra photos (optional)")
+        st.markdown("##### 3 · Extra photos (optional)")
         extra_imgs = st.file_uploader("ASN එකට අදාළ photos (GRN sheet, damage, seal...)",
                                       type=["png", "jpg", "jpeg", "webp"],
                                       accept_multiple_files=True, key="extra_img")
@@ -317,19 +508,22 @@ elif page == "📤 ASN Upload":
         img_asn = st.selectbox("මේ photos අදාළ ASN එක", all_asn or ["—"], key="img_asn") \
             if extra_imgs else None
 
-        st.markdown("### 4️⃣ Save")
-        c1, c2 = st.columns([2, 1])
+        st.markdown("##### 4 · Save")
+        c1, c2, c3 = st.columns([2, 1, 1])
         targets = c1.multiselect("Save කරන්න ඕන sheets",
                                  ["ASN_SUMMARY", "ASN_DETAIL"],
                                  default=["ASN_SUMMARY", "ASN_DETAIL"])
-        up_img = c2.checkbox("Images Drive එකට upload", value=True)
+        up_img = c2.checkbox("Images save", value=True)
+        keep_pdf = c3.checkbox("PDF attach", value=True,
+                               help="Upload කරපු PDF එකම ASN එකට document එකක් "
+                                    "විදිහට save කරනවා.")
 
         confirm = st.checkbox(
-            f"✅ මම confirm කරනවා — ලයින් {total_rows}ක් {', '.join(targets) or '—'} "
-            f"sheet(s) වලට save කරන්න.")
+            f"මම confirm කරනවා — ලයින් {total_rows}ක් "
+            f"{', '.join(targets) or '—'} sheet(s) වලට save කරන්න.")
 
         cA, cB = st.columns([1, 1])
-        if cA.button("💾 Save to Google Sheet", type="primary",
+        if cA.button("Save to Google Sheet", type="primary",
                      disabled=not (confirm and targets and all_ok)):
             ts = now_str()
             user = SS["user"] or "unknown"
@@ -365,12 +559,21 @@ elif page == "📤 ASN Upload":
                         "AX GRN": schema.AX_NA, "REMARK": "",
                     })
 
-                # images from the workbook
+                # images from the workbook / pdf
                 if up_img:
                     file_asn = clean(df["ASN_NO"].iloc[0]) if len(df) else ""
                     for im in p["images"]:
-                        img_rows.append((file_asn, im["name"], "EXCEL EMBEDDED",
+                        img_rows.append((file_asn, im["name"],
+                                         "PDF EMBEDDED" if p.get("kind") == "pdf"
+                                         else "EXCEL EMBEDDED",
                                          im["mime"], im["size_kb"], im["data"]))
+
+                # original PDF එකම document එකක් විදිහට
+                if keep_pdf and p.get("kind") == "pdf" and p.get("raw"):
+                    file_asn = clean(df["ASN_NO"].iloc[0]) if len(df) else ""
+                    img_rows.append((file_asn, fname, "ASN DOCUMENT",
+                                     "application/pdf",
+                                     round(len(p["raw"]) / 1024, 1), p["raw"]))
 
             if extra_imgs and up_img and img_asn and img_asn != "—":
                 for uf in extra_imgs:
@@ -397,7 +600,7 @@ elif page == "📤 ASN Upload":
                 # images
                 if img_rows:
                     ok_n, errs = 0, []
-                    prog = st.progress(0.0, text="Images save වෙනවා...")
+                    prog = st.progress(0.0, text="Attachments save වෙනවා...")
                     for i, (asn, nm, src, mime, kb, data) in enumerate(img_rows):
                         ok, msg = images.save_image(asn, nm, data, mime,
                                                     source=src, user=user)
@@ -408,10 +611,10 @@ elif page == "📤 ASN Upload":
                         else:
                             errs.append(msg)
                         prog.progress((i + 1) / len(img_rows),
-                                      text=f"Images {i + 1}/{len(img_rows)}")
+                                      text=f"Attachment {i + 1}/{len(img_rows)}")
                     prog.empty()
                     if ok_n:
-                        st.success(f"🖼️ Images {ok_n}ක් save කළා")
+                        st.success(f"Attachments {ok_n}ක් save කළා")
                     for e_ in errs[:6]:
                         st.warning(e_)
 
@@ -428,7 +631,7 @@ elif page == "📤 ASN Upload":
 #  📦 INVENTORY
 # ═══════════════════════════════════════════════════════════════════
 elif page == "📦 Inventory":
-    hero("📦 Korber Inventory", "Inventory report එක upload කරලා snapshot එකක් තියාගන්න")
+    hero("Korber Inventory", "Inventory report එක upload කරලා snapshot එකක් තියාගන්න")
 
     f = st.file_uploader("Inventory Excel", type=["xlsx", "xlsm", "xls"], key="inv_up")
     if f:
@@ -492,8 +695,7 @@ elif page == "📦 Inventory":
 #  🔄 RECONCILIATION
 # ═══════════════════════════════════════════════════════════════════
 elif page == "🔄 Reconciliation":
-    hero("🔄 ASN ↔ Inventory Reconciliation",
-         "GRN complete උනේ මොනාද, නැත්තේ මොනාද, විෂමතා මොනාද")
+    hero("Reconciliation", "ASN ↔ Korber inventory — GRN complete උනේ මොනාද, විෂමතා මොනාද")
 
     det_all = gsheets.get_df("ASN_DETAIL")
     if det_all.empty:
@@ -644,7 +846,7 @@ elif page == "🔄 Reconciliation":
 #  🧾 ASN REGISTER
 # ═══════════════════════════════════════════════════════════════════
 elif page == "🧾 ASN Register":
-    hero("🧾 ASN Register", "Summary සහ Details — filter කරලා බලන්න / download කරන්න")
+    hero("ASN Register", "Summary සහ Details — filter කරලා බලන්න / download කරන්න")
 
     summ = gsheets.get_df("ASN_SUMMARY")
     det = gsheets.get_df("ASN_DETAIL")
@@ -718,7 +920,7 @@ elif page == "🧾 ASN Register":
 #  🔍 SEARCH
 # ═══════════════════════════════════════════════════════════════════
 elif page == "🔍 Search":
-    hero("🔍 Search", "ඕනෑම data එකක් — HU, ASN, item, lot, PO, GRN, vendor — හොයන්න")
+    hero("Search", "HU, ASN, item, lot, PO, GRN, vendor — ඕනෑම එකක් හොයන්න")
 
     SEARCHABLE = ["ASN_DETAIL", "ASN_SUMMARY", "INVENTORY", "DISCREPANCY",
                   "AX_GRN", "ASN_IMAGES", "RECON_LOG", "EMAIL_LOG"]
@@ -811,7 +1013,7 @@ elif page == "🔍 Search":
 #  ⚠️ DISCREPANCY
 # ═══════════════════════════════════════════════════════════════════
 elif page == "⚠️ Discrepancy":
-    hero("⚠️ Discrepancy Report", "Tally නොවුණ ඒවා — Summary සහ Details")
+    hero("Discrepancy Report", "Tally නොවුණ ඒවා — summary සහ line level details")
 
     disc = gsheets.get_df("DISCREPANCY")
     if disc.empty:
@@ -884,7 +1086,7 @@ elif page == "⚠️ Discrepancy":
 #  ✉️ EMAIL
 # ═══════════════════════════════════════════════════════════════════
 elif page == "✉️ Email":
-    hero("✉️ Discrepancy Email", "විස්තර සහිත Markdown email එකක් auto-generate")
+    hero("Discrepancy Email", "විස්තර සහිත Markdown email එකක් auto-generate")
 
     disc = gsheets.get_df("DISCREPANCY")
     summ = gsheets.get_df("ASN_SUMMARY")
@@ -953,7 +1155,7 @@ elif page == "✉️ Email":
 #  ✅ AX GRN
 # ═══════════════════════════════════════════════════════════════════
 elif page == "✅ AX GRN":
-    hero("✅ AX GRN", "Korber GRN Done → AX GRN Pending → AX GRN Done → Fully Complete")
+    hero("AX GRN", "Korber GRN done → AX GRN pending → AX GRN done → fully complete")
 
     ax = gsheets.get_df("AX_GRN")
     if ax.empty:
@@ -1022,8 +1224,8 @@ elif page == "✅ AX GRN":
 # ═══════════════════════════════════════════════════════════════════
 #  🖼️ ASN IMAGES
 # ═══════════════════════════════════════════════════════════════════
-elif page == "🖼️ ASN Images":
-    hero("🖼️ ASN Images", "ASN එකට අදාළ photos / Excel එකේ embed වුණ images")
+elif page == "🖼️ Attachments":
+    hero("Attachments", "ASN එකට අදාළ photos සහ PDF documents")
 
     meta = gsheets.get_df("ASN_IMAGES")
     summ = gsheets.get_df("ASN_SUMMARY")
@@ -1031,22 +1233,26 @@ elif page == "🖼️ ASN Images":
     if not asn_opts and not meta.empty:
         asn_opts = sorted({a for a in meta["ASN NO"] if a})
 
-    mode = str(gsheets.settings_dict().get("IMAGE_STORAGE", "SHEET")).upper()
-    st.caption(f"Storage mode: **{mode}** — Setup page එකෙන් වෙනස් කරන්න පුළුවන්.")
+    mode = str(gsheets.settings_dict().get("IMAGE_STORAGE", "DRIVE")).upper()
+    st.caption(f"Storage: **{mode}** — Setup → Attachments එකෙන් වෙනස් කරන්න පුළුවන්.")
 
-    with st.expander("➕ අලුත් image එකක් එකතු කරන්න", expanded=meta.empty):
+    with st.expander("අලුත් attachment එකක්", expanded=meta.empty):
         c1, c2 = st.columns([1, 2])
         asn = c1.selectbox("ASN", asn_opts or ["—"])
         note = c2.text_input("Note", "")
-        ups = st.file_uploader("Images", type=["png", "jpg", "jpeg", "webp", "bmp"],
+        ups = st.file_uploader("Images හෝ PDF",
+                               type=["png", "jpg", "jpeg", "webp", "bmp", "pdf"],
                                accept_multiple_files=True, key="img_only")
-        if st.button("⬆️ Upload", disabled=not ups or asn == "—", type="primary"):
+        if st.button("Upload", disabled=not ups or asn == "—", type="primary"):
             ok_n, errs = 0, []
             for uf in ups:
-                ok, msg = images.save_image(asn, uf.name, uf.getvalue(),
-                                            uf.type or "image/png",
-                                            source="MANUAL UPLOAD",
-                                            user=SS["user"] or "unknown", note=note)
+                d = uf.getvalue()
+                is_pdf = parsing.is_pdf(uf.name, d)
+                ok, msg = images.save_image(
+                    asn, uf.name, d,
+                    "application/pdf" if is_pdf else (uf.type or "image/png"),
+                    source="ASN DOCUMENT" if is_pdf else "MANUAL UPLOAD",
+                    user=SS["user"] or "unknown", note=note)
                 if ok:
                     ok_n += 1
                     if msg and "fail" in msg.lower():
@@ -1054,49 +1260,67 @@ elif page == "🖼️ ASN Images":
                 else:
                     errs.append(msg)
             if ok_n:
-                st.success(f"{ok_n} save කළා ✅")
+                st.success(f"{ok_n} save කළා")
             for e_ in errs:
                 st.warning(e_)
             if ok_n:
                 st.rerun()
 
     if meta.empty:
-        st.info("Images නෑ.")
+        st.info("Attachments නෑ.")
     else:
-        f = st.selectbox("ASN filter", ["— සියල්ල —"] +
+        c1, c2 = st.columns([2, 1])
+        f = c1.selectbox("ASN filter", ["සියල්ල"] +
                          sorted({a for a in meta["ASN NO"] if a}))
-        v = meta if f.startswith("—") else meta[meta["ASN NO"] == f]
+        kinds = sorted({k for k in meta["KIND"] if str(k).strip()}) or ["IMAGE"]
+        kf = c2.multiselect("Kind", kinds, default=kinds)
+
+        v = meta if f == "සියල්ල" else meta[meta["ASN NO"] == f]
+        if kf:
+            v = v[v["KIND"].isin(kf) | (v["KIND"].astype(str).str.strip() == "")]
 
         a, b, c = st.columns(3)
-        kpi(a, len(v), "Images")
-        kpi(b, v["ASN NO"].nunique(), "ASN")
+        kpi(a, len(v), "Attachments")
+        kpi(b, v["ASN NO"].nunique(), "ASN covered")
         kpi(c, f'{fmt_num(v["SIZE KB"].map(to_num).sum())} KB', "Total size")
 
-        show(v[["IMAGE ID", "ASN NO", "FILE NAME", "SOURCE", "SIZE KB", "STORAGE",
-                "UPLOADED AT", "UPLOADED BY", "NOTE"]])
+        show(v[["IMAGE ID", "ASN NO", "FILE NAME", "KIND", "SOURCE", "SIZE KB",
+                "STORAGE", "UPLOADED AT", "UPLOADED BY", "NOTE"]])
 
-        st.markdown("#### 👁️ Preview")
+        st.markdown("###### Preview")
         cols = st.columns(4)
         for i, (_, r) in enumerate(v.head(16).iterrows()):
             with cols[i % 4]:
-                if str(r.get("STORAGE", "SHEET")).upper() == "DRIVE" and r.get("LINK"):
-                    st.markdown(f"[🔗 {r['FILE NAME']}]({r['LINK']})")
+                is_pdf = str(r.get("KIND", "")).upper() == "PDF" or \
+                    str(r.get("MIME", "")).lower() == "application/pdf"
+                if str(r.get("STORAGE", "")).upper() == "DRIVE" and r.get("LINK"):
+                    st.markdown(f"{'📕' if is_pdf else '🖼️'} "
+                                f"[{r['FILE NAME']}]({r['LINK']})")
+                    st.caption(f"{r['ASN NO']} · {r['SIZE KB']} KB")
                 else:
                     data = images.load_image(r["IMAGE ID"])
-                    if data:
-                        st.image(data, caption=f"{r['ASN NO']} · {r['FILE NAME']}",
-                                 width="stretch")
-                        st.download_button("📥", data, file_name=r["FILE NAME"],
-                                           mime=r.get("MIME") or "image/jpeg",
+                    if not data:
+                        st.caption(f"{r['FILE NAME']} — data නෑ")
+                    elif is_pdf:
+                        st.markdown(f"📕 **{r['FILE NAME']}**")
+                        st.caption(f"{r['ASN NO']} · {r['SIZE KB']} KB")
+                        st.download_button("Download", data,
+                                           file_name=r["FILE NAME"],
+                                           mime="application/pdf",
                                            key=f"dl_{r['IMAGE ID']}")
                     else:
-                        st.caption(f"⚠️ {r['FILE NAME']} — data නෑ")
+                        st.image(data, caption=f"{r['ASN NO']} · {r['FILE NAME']}",
+                                 width="stretch")
+                        st.download_button("Download", data,
+                                           file_name=r["FILE NAME"],
+                                           mime=r.get("MIME") or "image/jpeg",
+                                           key=f"dl_{r['IMAGE ID']}")
 
-        with st.expander("🗑️ Image delete"):
+        with st.expander("Delete"):
             ids = st.multiselect("IMAGE ID", list(v["IMAGE ID"]))
             if st.button("Delete", disabled=not ids):
                 n = images.delete_images(ids)
-                st.success(f"{n} delete කළා ✅")
+                st.success(f"{n} delete කළා")
                 st.rerun()
 
 
@@ -1104,15 +1328,16 @@ elif page == "🖼️ ASN Images":
 #  📊 DASHBOARD
 # ═══════════════════════════════════════════════════════════════════
 elif page == "📊 Dashboard":
-    hero("📊 Dashboard", "ASN → Korber GRN → AX GRN pipeline එකේ තත්ත්වය")
-
     summ = gsheets.get_df("ASN_SUMMARY")
     det = gsheets.get_df("ASN_DETAIL")
     disc = gsheets.get_df("DISCREPANCY")
-    ax = gsheets.get_df("AX_GRN")
+    log = gsheets.get_df("RECON_LOG")
+
+    last = clean(log["RUN AT"].iloc[-1]) if not log.empty else "—"
+    hero("Dashboard", f"ASN → Korber GRN → AX GRN · last reconciliation {last}")
 
     if summ.empty:
-        st.info("Data නෑ. 📤 ASN Upload එකෙන් පටන් ගන්න.")
+        st.info("Data නෑ. **📤 ASN Upload** එකෙන් පටන් ගන්න.")
         st.stop()
 
     n_asn = len(summ)
@@ -1120,83 +1345,108 @@ elif page == "📊 Dashboard":
     n_axp = int((summ["AX GRN"] == schema.AX_PENDING).sum())
     n_comp = int((summ["OVERALL"] == schema.S_COMPLETE).sum())
     n_open = int((disc["STATUS"] == "OPEN").sum()) if not disc.empty else 0
+    asn_qty = summ["TOTAL QTY"].map(to_num).sum()
+    rec_qty = summ["RECEIVED QTY"].map(to_num).sum()
+    lines = len(det)
+    tally = int((det["MATCH STATUS"] == schema.M_MATCHED).sum()) if not det.empty else 0
+    rate = (tally / lines * 100) if lines else 0
+    pending_asn = n_asn - n_comp
 
-    a, b, c, d, e = st.columns(5)
-    kpi(a, n_asn, "Total ASN")
-    kpi(b, n_korber, "Korber GRN Done", "#2f8f83")
-    kpi(c, n_axp, "AX GRN Pending", "#3a6ea5")
-    kpi(d, n_comp, "Fully Complete", "#2f7a45")
-    kpi(e, n_open, "Open discrepancies", "#c4453f")
+    a, b, c, d = st.columns(4)
+    kpi(a, n_asn, "ASN in system", note=f"{lines} lines · {fmt_num(asn_qty)} qty")
+    kpi(b, f"{rate:.0f}%", "Lines tallied", ACCENT, f"{tally} of {lines} lines")
+    kpi(c, n_open, "Open discrepancies", DANGER if n_open else OK,
+        "all clear" if not n_open else "needs action")
+    kpi(d, pending_asn, "ASN not yet complete", WARN if pending_asn else OK,
+        f"{n_comp} fully complete")
 
-    st.markdown("")
-    c1, c2 = st.columns([1, 1])
+    st.markdown("#### Pipeline")
+    pipeline([
+        ("ASN uploaded", n_asn, MUTED),
+        ("Korber GRN done", n_korber, ACCENT),
+        ("AX GRN pending", n_axp, INFO),
+        ("Fully complete", n_comp, OK),
+    ])
+
+    c1, c2 = st.columns(2)
 
     with c1:
-        st.markdown("##### ASN status")
-        vc = summ["STATUS"].replace("", schema.S_NEW).value_counts()
-        fig = px.pie(values=vc.values, names=vc.index, hole=.55,
-                     color=vc.index, color_discrete_map=schema.STATUS_COLORS)
-        fig.update_layout(height=320, margin=dict(t=10, b=10, l=10, r=10),
-                          legend=dict(orientation="h", y=-.1))
-        st.plotly_chart(fig, width="stretch")
+        st.markdown("###### ASN by status")
+        vc = summ["STATUS"].replace("", schema.S_NEW).value_counts().sort_values()
+        fig = go.Figure(go.Bar(
+            x=vc.values, y=vc.index, orientation="h",
+            marker_color=[schema.STATUS_COLORS.get(i, MUTED) for i in vc.index],
+            text=vc.values, textposition="outside", cliponaxis=False))
+        fig.update_layout(xaxis=dict(showticklabels=False, showgrid=False),
+                          yaxis=dict(showgrid=False))
+        st.plotly_chart(fig_style(fig, 290), width="stretch")
 
     with c2:
-        st.markdown("##### GRN pipeline")
-        stages = ["ASN uploaded", "Korber GRN Done", "AX GRN Pending", "Fully Complete"]
-        vals = [n_asn, n_korber, n_axp, n_comp]
-        fig = go.Figure(go.Funnel(y=stages, x=vals,
-                                  marker=dict(color=["#8b93a7", "#2f8f83", "#3a6ea5", "#2f7a45"]),
-                                  textinfo="value+percent initial"))
-        fig.update_layout(height=320, margin=dict(t=10, b=10, l=10, r=10))
-        st.plotly_chart(fig, width="stretch")
-
-    c1, c2 = st.columns([1, 1])
-    with c1:
-        st.markdown("##### Line level match")
-        if not det.empty:
-            v = det["MATCH STATUS"].replace("", schema.M_PENDING).value_counts()
-            fig = px.bar(x=v.values, y=v.index, orientation="h",
-                         labels={"x": "Lines", "y": ""}, text=v.values)
-            fig.update_traces(marker_color="#3a6ea5")
-            fig.update_layout(height=320, margin=dict(t=10, b=10, l=10, r=10))
-            st.plotly_chart(fig, width="stretch")
-
-    with c2:
-        st.markdown("##### Discrepancy by type")
-        if not disc.empty:
-            v = disc["DISCREPANCY TYPE"].value_counts()
-            fig = px.bar(x=v.index, y=v.values, text=v.values, labels={"x": "", "y": "Lines"})
-            fig.update_traces(marker_color="#c4453f")
-            fig.update_layout(height=320, margin=dict(t=10, b=10, l=10, r=10),
-                              xaxis_tickangle=-20)
-            st.plotly_chart(fig, width="stretch")
+        st.markdown("###### Line match result")
+        if det.empty or det["MATCH STATUS"].astype(str).str.strip().eq("").all():
+            st.caption("තාම reconcile කරලා නෑ.")
         else:
-            st.success("විෂමතා නෑ 🎉")
+            v = det["MATCH STATUS"].replace("", schema.M_PENDING).value_counts().sort_values()
+            cmap = {schema.M_MATCHED: ACCENT, schema.M_MISSING: WARN,
+                    schema.M_PENDING: MUTED, schema.M_EXTRA: INFO}
+            fig = go.Figure(go.Bar(
+                x=v.values, y=v.index, orientation="h",
+                marker_color=[cmap.get(i, DANGER) for i in v.index],
+                text=v.values, textposition="outside", cliponaxis=False))
+            fig.update_layout(xaxis=dict(showticklabels=False, showgrid=False),
+                              yaxis=dict(showgrid=False))
+            st.plotly_chart(fig_style(fig, 290), width="stretch")
 
-    st.markdown("##### ASN wise Qty — ASN vs Received")
-    top = summ.copy()
-    top["_a"] = top["TOTAL QTY"].map(to_num)
-    top["_r"] = top["RECEIVED QTY"].map(to_num)
-    top = top.nlargest(15, "_a")
-    fig = go.Figure()
-    fig.add_bar(name="ASN Qty", x=top["ASN NO"], y=top["_a"], marker_color="#8b93a7")
-    fig.add_bar(name="Received Qty", x=top["ASN NO"], y=top["_r"], marker_color="#2f8f83")
-    fig.update_layout(barmode="group", height=350, margin=dict(t=10, b=10, l=10, r=10),
-                      xaxis_tickangle=-25, legend=dict(orientation="h", y=1.1))
-    st.plotly_chart(fig, width="stretch")
+    c1, c2 = st.columns([3, 2])
 
-    st.markdown("##### 🔔 Action required")
+    with c1:
+        st.markdown("###### ASN quantity — expected vs received")
+        top = summ.copy()
+        top["_a"] = top["TOTAL QTY"].map(to_num)
+        top["_r"] = top["RECEIVED QTY"].map(to_num)
+        top = top.nlargest(12, "_a").sort_values("_a")
+        fig = go.Figure()
+        fig.add_bar(name="ASN", y=top["ASN NO"], x=top["_a"], orientation="h",
+                    marker_color="#cbd3dc")
+        fig.add_bar(name="Received", y=top["ASN NO"], x=top["_r"], orientation="h",
+                    marker_color=ACCENT)
+        fig.update_layout(barmode="group", bargap=.28,
+                          yaxis=dict(showgrid=False),
+                          xaxis=dict(showgrid=True, gridcolor=LINE))
+        st.plotly_chart(fig_style(fig, 340, legend=True), width="stretch")
+
+    with c2:
+        st.markdown("###### Discrepancies by type")
+        if disc.empty:
+            st.success("විෂමතා නෑ.")
+        else:
+            v = disc["DISCREPANCY TYPE"].value_counts().sort_values()
+            fig = go.Figure(go.Bar(
+                x=v.values, y=v.index, orientation="h",
+                marker_color=DANGER, text=v.values,
+                textposition="outside", cliponaxis=False))
+            fig.update_layout(xaxis=dict(showticklabels=False, showgrid=False),
+                              yaxis=dict(showgrid=False))
+            st.plotly_chart(fig_style(fig, 340), width="stretch")
+
+    st.markdown("###### Needs action")
     need = summ[summ["OVERALL"] != schema.S_COMPLETE]
-    show(need[["ASN NO", "TOTAL LINES", "MATCHED LINES", "MISSING LINES",
-               "MISMATCH LINES", "EXTRA LINES", "STATUS", "KORBER GRN", "AX GRN",
-               "LAST RECON"]], height=320)
+    if need.empty:
+        st.success("හැම ASN එකක්ම fully complete 🎉")
+    else:
+        show(need[["ASN NO", "TOTAL LINES", "MATCHED LINES", "MISSING LINES",
+                   "MISMATCH LINES", "EXTRA LINES", "STATUS", "KORBER GRN",
+                   "AX GRN", "LAST RECON"]], height=300)
+
+    st.caption(f"Quantity received {fmt_num(rec_qty)} of {fmt_num(asn_qty)} expected "
+               f"· variance {fmt_num(rec_qty - asn_qty)}")
 
 
 # ═══════════════════════════════════════════════════════════════════
 #  🗂️ DATA MANAGER
 # ═══════════════════════════════════════════════════════════════════
 elif page == "🗂️ Data Manager":
-    hero("🗂️ Data Manager", "ඕනෑම sheet එකක records edit / delete කරන්න (admin)")
+    hero("Data Manager", "ඕනෑම sheet එකක records edit / delete කරන්න (admin)")
 
     if SS["role"] != "admin":
         st.warning("Admin විතරයි. Sidebar → 🔑 Admin → PIN.")
@@ -1226,7 +1476,7 @@ elif page == "🗂️ Data Manager":
 #  🧹 MAINTENANCE  — ASN delete · database reset
 # ═══════════════════════════════════════════════════════════════════
 elif page == "🧹 Maintenance":
-    hero("🧹 Maintenance", "ASN delete · පරණ data clean · database reset")
+    hero("Maintenance", "ASN delete · sheet clear · database reset")
 
     if SS["role"] != "admin":
         st.warning("Admin විතරයි. Sidebar → 🔑 Admin → PIN දාන්න.")
@@ -1400,6 +1650,7 @@ elif page == "🧹 Maintenance":
 
 # ───────────────────────────── footer ─────────────────────────────
 st.markdown(
-    "<div style='text-align:center;color:#8b93a7;font-size:.75rem;margin-top:28px'>"
-    "ASN ↔ GRN Control System · Streamlit + Google Sheets · Korber One / AX"
+    f"<div style='text-align:center;color:{MUTED};font-size:.73rem;"
+    f"margin-top:2.4rem;padding-top:1rem;border-top:1px solid {LINE}'>"
+    "ASN ↔ GRN Control System · Korber One / AX · EFL Warehouse Operations"
     "</div>", unsafe_allow_html=True)

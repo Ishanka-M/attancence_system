@@ -317,3 +317,179 @@ def extract_images(file_bytes: bytes) -> list[dict]:
     except Exception:
         pass
     return out
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  PDF  —  ASN documents PDF විදිහට එනවා නම්
+# ═══════════════════════════════════════════════════════════════════
+def pdf_available() -> bool:
+    try:
+        import pdfplumber  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def is_pdf(name: str, data: bytes = b"") -> bool:
+    return str(name).lower().endswith(".pdf") or data[:5] == b"%PDF-"
+
+
+def _table_to_raw(table: list[list]) -> pd.DataFrame:
+    """pdfplumber table (list of rows) -> header නැති DataFrame."""
+    width = max((len(r) for r in table), default=0)
+    rows = [list(r) + [""] * (width - len(r)) for r in table]
+    return pd.DataFrame(rows, dtype=object)
+
+
+def list_pdf_tables(file_bytes: bytes) -> list[dict]:
+    """
+    PDF එකේ තියෙන හැම table එකක්ම හොයලා, ASN data වගේ තියෙන ඒවා ඉස්සරහට
+    දාලා list කරනවා — user ට "මොන table එකද?" කියලා තෝරන්න.
+
+    return: [{key, label, page, index, rows, cols, score, preview(df), raw(df)}]
+    """
+    if not pdf_available():
+        return []
+    import pdfplumber
+
+    out = []
+    try:
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+            for pi, page in enumerate(pdf.pages, start=1):
+                try:
+                    tables = page.extract_tables()
+                except Exception:
+                    tables = []
+                for ti, tb in enumerate(tables):
+                    if not tb or len(tb) < 2:
+                        continue
+                    raw = _table_to_raw(tb)
+                    _, cmap = _detect_header(raw, ASN_LOOKUP, ASN_MUST)
+                    score = len(cmap) + (10 if ASN_MUST.issubset(set(cmap.values())) else 0)
+                    out.append({
+                        "key": f"p{pi}t{ti}",
+                        "label": (f"Page {pi} · Table {ti + 1} · "
+                                  f"{len(raw)}×{raw.shape[1]} · "
+                                  f"ASN columns {len(cmap)}"),
+                        "page": pi,
+                        "index": ti,
+                        "rows": len(raw),
+                        "cols": raw.shape[1],
+                        "score": score,
+                        "raw": raw,
+                    })
+    except Exception:
+        return []
+
+    out.sort(key=lambda d: (-d["score"], d["page"], d["index"]))
+    return out
+
+
+def parse_asn_pdf(file_bytes: bytes, table_keys: list[str] | None = None
+                  ) -> tuple[pd.DataFrame, dict]:
+    """
+    PDF එකේ තෝරපු table(s) වලින් ASN canonical DataFrame එකක්.
+    table_keys නැත්නම් හොඳම එක automatic ව තෝරගන්නවා.
+    """
+    if not pdf_available():
+        return pd.DataFrame(columns=list(ASN_ALIASES)), {
+            "header_row": None, "mapped": {}, "unmapped": [], "sheet": "PDF",
+            "error": "pdfplumber install වෙලා නෑ. `pip install pdfplumber` කරන්න.",
+        }
+
+    tables = list_pdf_tables(file_bytes)
+    if not tables:
+        return pd.DataFrame(columns=list(ASN_ALIASES)), {
+            "header_row": None, "mapped": {}, "unmapped": [], "sheet": "PDF",
+            "error": ("PDF එකේ table එකක් හම්බුණේ නෑ. Scan කරපු PDF එකක් නම් "
+                      "text layer එකක් නෑ — Excel එකක් දාන්න, නැත්නම් මේ PDF එක "
+                      "ASN එකට document එකක් විදිහට attach කරන්න."),
+        }
+
+    picked = [t for t in tables if t["key"] in (table_keys or [])] or [tables[0]]
+
+    frames, mapped, unmapped, hdr = [], {}, [], None
+    for t in picked:
+        raw = t["raw"]
+        hrow, cmap = _detect_header(raw, ASN_LOOKUP, ASN_MUST)
+        if hrow < 0 or not cmap:
+            continue
+        hdr = hdr or f"{t['page']}/{hrow + 1}"
+        header_vals = raw.iloc[hrow].tolist()
+        body = raw.iloc[hrow + 1:].reset_index(drop=True)
+        data = {canon: (body[j] if j in body.columns else "")
+                for j, canon in cmap.items()}
+        frames.append(pd.DataFrame(data))
+        mapped.update({str(header_vals[j]): c for j, c in cmap.items()})
+        unmapped += [str(h) for j, h in enumerate(header_vals)
+                     if j not in cmap and clean(h) != ""]
+
+    if not frames:
+        return pd.DataFrame(columns=list(ASN_ALIASES)), {
+            "header_row": None, "mapped": {}, "unmapped": [], "sheet": "PDF",
+            "error": "තෝරපු table එකේ ASN columns (ASN no / HU / Qty) හඳුනාගන්න බැරි උනා.",
+        }
+
+    df = pd.concat(frames, ignore_index=True)
+    for c in ASN_ALIASES:
+        if c not in df.columns:
+            df[c] = ""
+    df = df[list(ASN_ALIASES)]
+    for c in df.columns:
+        df[c] = df[c].map(clean)
+    for c in ("QTY", "S_QTY", "GROSS_WEIGHT", "NET_WEIGHT"):
+        df[c] = df[c].map(lambda v: fmt_num(v) if clean(v) != "" else "")
+
+    df = df[(df["HU_ID"].str.strip() != "") | (df["ASN_NO"].str.strip() != "")]
+    df = df.reset_index(drop=True)
+
+    # header row එකම නැවත repeat වෙලා තියෙනවා නම් (multi-page tables) අයින්
+    df = df[df["HU_ID"].str.upper().str.strip() != "HU_ID"].reset_index(drop=True)
+
+    if (df["ASN_LINE"].str.strip() == "").all():
+        df["ASN_LINE"] = [str(i + 1) for i in range(len(df))]
+
+    meta = {
+        "header_row": hdr,
+        "mapped": mapped,
+        "unmapped": sorted(set(unmapped)),
+        "sheet": " + ".join(t["label"].split(" · ")[0] + "/" + str(t["index"] + 1)
+                            for t in picked),
+        "rows": len(df),
+        "error": None,
+    }
+    return df, meta
+
+
+def extract_pdf_images(file_bytes: bytes, max_images: int = 20) -> list[dict]:
+    """PDF එකේ embed වෙච්ච images (pypdf). නැත්නම් හිස් list එකක්."""
+    out = []
+    try:
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(file_bytes))
+        for pi, page in enumerate(reader.pages, start=1):
+            for im in getattr(page, "images", []):
+                data = im.data
+                if not data or len(data) < 4096:      # icons/logos skip
+                    continue
+                nm = getattr(im, "name", f"p{pi}_img")
+                ext = "." + nm.rsplit(".", 1)[-1].lower() if "." in nm else ".png"
+                out.append({
+                    "name": f"p{pi}_{nm}",
+                    "data": data,
+                    "mime": _IMG_EXT.get(ext, "image/png"),
+                    "size_kb": round(len(data) / 1024, 1),
+                })
+                if len(out) >= max_images:
+                    return out
+    except Exception:
+        pass
+    return out
+
+
+def pdf_page_count(file_bytes: bytes) -> int:
+    try:
+        from pypdf import PdfReader
+        return len(PdfReader(io.BytesIO(file_bytes)).pages)
+    except Exception:
+        return 0

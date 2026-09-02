@@ -83,16 +83,23 @@ def _opts() -> tuple[str, int, int]:
 # ───────────────────────── save ─────────────────────────
 def save_image(asn: str, filename: str, data: bytes, mime: str,
                source: str = "MANUAL UPLOAD", user: str = "",
-               note: str = "") -> tuple[bool, str]:
+               note: str = "", kind: str = "") -> tuple[bool, str]:
     """
-    Image එකක් save කරනවා.  return: (ok, message)
+    Image එකක් හෝ PDF එකක් save කරනවා.  return: (ok, message)
     IMAGE_STORAGE=DRIVE නම් මුලින්ම Drive, fail වුණොත් Sheet එකට fallback.
     """
     if not data:
         return False, f"{filename}: file එක හිස්."
 
     mode, px, q = _opts()
-    small, mime2 = compress(data, mime, px, q)
+    is_pdf = (str(mime).lower() == "application/pdf"
+              or str(filename).lower().endswith(".pdf"))
+    kind = kind or ("PDF" if is_pdf else "IMAGE")
+
+    if is_pdf:
+        small, mime2 = data, "application/pdf"      # PDF compress කරන්නේ නෑ
+    else:
+        small, mime2 = compress(data, mime, px, q)
     img_id = uuid.uuid4().hex[:10].upper()
     ts = now_str()
     storage, link, file_id = "SHEET", "", ""
@@ -110,8 +117,9 @@ def save_image(asn: str, filename: str, data: bytes, mime: str,
     # ── 2. Sheet එකට bytes ──
     if storage == "SHEET":
         if len(small) > MAX_BYTES:
-            return False, (f"{filename}: image එක ලොකු වැඩියි "
-                           f"({len(small) // 1024} KB). පොඩි එකක් දාන්න.")
+            return False, (f"{filename}: file එක ලොකු වැඩියි "
+                           f"({len(small) // 1024} KB) — Sheet එකේ තියාගන්න බෑ. "
+                           f"Drive folder එක හදාගන්න, නැත්නම් පොඩි එකක් දාන්න.")
         b64 = base64.b64encode(small).decode("ascii")
         chunks = [b64[i:i + CHUNK] for i in range(0, len(b64), CHUNK)]
         gsheets.append_rows("IMAGE_DATA",
@@ -121,6 +129,7 @@ def save_image(asn: str, filename: str, data: bytes, mime: str,
         "IMAGE ID": img_id,
         "ASN NO": asn,
         "FILE NAME": filename,
+        "KIND": kind,
         "SOURCE": source,
         "MIME": mime2,
         "SIZE KB": round(len(small) / 1024, 1),

@@ -33,8 +33,8 @@ ASN document එකක් upload කරලා, Korber One inventory එකට ma
 
 | Page | වැඩේ |
 |------|------|
-| ⚙️ **Setup** | Google Sheet එකේ **හැම tab එකක්ම auto-create** + matching settings |
-| 📤 **ASN Upload** | Excel upload → **sheet එක තෝරලා confirm** → Summary + Details save → Excel එකේ තියෙන **images auto-extract** කරලා Drive එකට |
+| ⚙️ **Setup** | Sheets auto-create · matching rules · attachments · **API & quota panel** |
+| 📤 **ASN Upload** | **Excel හෝ PDF** upload → sheet/table එක තෝරලා confirm → Summary + Details save → file එකේ **images auto-extract** + PDF එකම attach |
 | 📦 **Inventory** | Korber inventory report upload + snapshot save |
 | 🔄 **Reconciliation** | ASN vs Inventory match → tally ඒවාට **Korber GRN Done** remark → tally නැති ඒවා discrepancy |
 | 🧾 **ASN Register** | Summary + Details browse / filter / Excel download |
@@ -42,7 +42,7 @@ ASN document එකක් upload කරලා, Korber One inventory එකට ma
 | ✉️ **Email** | විස්තර සහිත **Markdown email** එකක් auto-generate (copy කරගන්න code block එකක්) |
 | ✅ **AX GRN** | AX GRN Pending list → **AX GRN Done** button → Fully Complete |
 | 🔍 **Search** | ඕනෑම data එකක් — HU, ASN, item, lot, PO, GRN, vendor — sheets කිහිපයක් හරහා |
-| 🖼️ **ASN Images** | ASN එකට අදාළ photos + preview + download + delete |
+| 🖼️ **Attachments** | Photos සහ PDF documents — preview, download, delete |
 | 📊 **Dashboard** | Pipeline funnel, status donut, discrepancy charts, ASN vs Received qty |
 | 🗂️ **Data Manager** | ඕනෑම sheet එකක් edit කරන්න (admin PIN) |
 | 🧹 **Maintenance** | **ASN delete** · sheet clear · **Database reset** (backup + confirm සමග) |
@@ -107,22 +107,60 @@ streamlit run app.py
 
 ---
 
-## 🖼️ Images ගැන
+## 📕 PDF support
 
-Default විදිහට images **Google Sheet එකේම** save වෙනවා — Drive එක ඕන නෑ.
+ASN document එක PDF එකකින් ආවත් වැඩ කරනවා.
 
-* ASN Excel එක ඇතුළේ **embed වෙච්ච images** upload කරද්දීම auto-extract වෙනවා
+* `pdfplumber` එකෙන් PDF එකේ **හැම table එකක්ම** හොයලා, ASN columns
+  කීයක් තියෙනවද කියලා score කරලා ලකුණු කරනවා. හොඳම එක ඉස්සරහට එනවා.
+* Upload කරද්දී "Page 2 · Table 1 · 34×9 · ASN columns 9" වගේ options
+  එනවා — **තෝරලා confirm කරන්න** ඕනේ, Excel එකේ sheet එක වගේම.
+* Multi-page tables වල repeat වෙන header rows automatic ව අයින් වෙනවා.
+* PDF එකේ embed වුණ images ත් auto-extract වෙනවා, සහ **PDF එකම** ASN එකට
+  document එකක් විදිහට attach වෙනවා (Upload page එකේ *PDF attach* checkbox).
+* Scan කරපු (text layer නැති) PDF එකකදී පැහැදිලි message එකක් එනවා —
+  ඒ වගේ එකක් attachment එකක් විදිහට තියාගෙන Excel එකෙන් data දාන්න.
+
+---
+
+## 🖼️ Attachments (images + PDF)
+
+Default විදිහට **Drive folder** එකට යනවා. Drive එක fail වුණොත් automatic ව
+**Google Sheet එකට** fallback වෙනවා — attachment එකක් කවදාවත් නැති වෙන්නේ නෑ.
+
+* Excel/PDF එක ඇතුළේ embed වුණ images upload කරද්දීම auto-extract වෙනවා
   (`Insert → Picture` සහ `Insert image in cell` දෙකම).
-* Pillow එකෙන් resize (default max 1400px) + JPEG compress කරලා,
-  base64 chunks විදිහට `IMAGE_DATA` sheet එකට. Metadata `ASN_IMAGES` sheet එකේ.
-* 10 MB photo එකක් ~500 KB දක්වා පොඩි වෙනවා. `🖼️ ASN Images` page එකේ
-  preview, download, delete කරන්න පුළුවන්.
+* Pillow එකෙන් resize (default max 1400px) + JPEG compress. 10 MB photo එකක්
+  ~500 KB දක්වා පොඩි වෙනවා. PDF compress කරන්නේ නෑ.
+* SHEET mode එකේදී base64 chunks විදිහට `IMAGE_DATA` sheet එකට,
+  metadata `ASN_IMAGES` sheet එකේ.
 
-**Drive එකට ඕන නම්:** Setup → Image storage → `DRIVE`, ඊට පස්සේ Drive folder
-එකක් හදලා service account එකට **Editor** විදිහට share කරලා folder ID එක දාන්න.
-Service account එකකට තමන්ගේ storage quota නෑ — folder එක share කරලා නැත්නම්
-Drive upload එක fail වෙනවා. ඒ වුණත් fail වුණාම automatic ව Sheet එකට
-fallback වෙනවා, ඒ නිසා image එක නැති වෙන්නේ නෑ.
+### Drive folder එක හදාගන්නේ කොහොමද
+
+1. Setup → **Attachments** tab එකේ folder **link එකම** paste කරන්න පුළුවන් —
+   ID එක automatic ව extract වෙනවා.
+2. ඒ folder එක service account email එකට **Editor** විදිහට share කරන්න.
+   Email එක Setup page එකේ පෙන්නනවා.
+3. **Drive connection test** button එකෙන් හරියටම වැඩද කියලා බලන්න.
+
+> Google service account එකකට තමන්ගේ Drive storage quota නෑ. My Drive folder
+> එකකට upload කරද්දී `storageQuotaExceeded` ආවොත්, folder එක **Shared Drive**
+> එකක් යටතට ගන්න, නැත්නම් storage `SHEET` කරන්න. දෙකෙන් එකක්වත් නැතත්
+> fallback එක නිසා data නැති වෙන්නේ නෑ.
+
+---
+
+## 🔌 API management
+
+Google Sheets API එකේ සීමාව විනාඩියකට request **60**ක්. Setup → **API & quota**
+tab එකේ මේවා තියෙනවා:
+
+* විනාඩියේ calls ගණන live counter එකක් (sidebar එකෙත් පෙන්නනවා)
+* සීමාවට ළං වුණාම **automatic throttle** — error එකක් වෙනුවට තත්පර ටිකක් රැඳෙනවා
+* `429 / 500 / 502 / 503 / 504` වලට **exponential backoff + jitter** retry
+  (උපරිම 5 වතාවක්). අනිත් errors කෙළින්ම එනවා, හංගන්නේ නෑ.
+* Rate limit සහ cache TTL tune කරන්න පුළුවන්
+* Retry / error / throttle counters + last error message
 
 ---
 
@@ -144,9 +182,9 @@ ASN එකක් වේගයෙන් delete කරන්න `🧾 ASN Register
 |------|------|
 | `app.py` | Streamlit UI — හැම page එකම |
 | `schema.py` | Sheet definitions + status constants |
-| `gsheets.py` | Google Sheets backend + auto-create |
-| `parsing.py` | Excel parsing (alias mapping, header detect, image extract) |
+| `gsheets.py` | Google Sheets backend · auto-create · API manager |
+| `parsing.py` | Excel + PDF parsing (alias mapping, header detect, image extract) |
 | `matching.py` | Reconciliation engine |
 | `reporting.py` | Excel reports + Markdown email |
-| `images.py` | Image compress / Sheet storage / load / delete |
+| `images.py` | Image/PDF compress · Sheet storage · load · delete |
 | `drive.py` | Drive image upload (optional) |

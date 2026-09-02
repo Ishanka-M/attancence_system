@@ -46,13 +46,13 @@ S_AX_PENDING = "AX GRN PENDING"
 S_COMPLETE = "FULLY COMPLETE"
 
 STATUS_COLORS = {
-    S_NEW: "#8b93a7",
-    S_GRN_PENDING: "#c9782a",
-    S_PARTIAL: "#c9a22a",
-    S_DISCREPANCY: "#c4453f",
-    S_KORBER_DONE: "#2f8f83",
-    S_AX_PENDING: "#3a6ea5",
-    S_COMPLETE: "#2f7a45",
+    S_NEW: "#94a3b8",
+    S_GRN_PENDING: "#a5670c",
+    S_PARTIAL: "#b78103",
+    S_DISCREPANCY: "#b3261e",
+    S_KORBER_DONE: "#0d6e63",
+    S_AX_PENDING: "#2d5f9a",
+    S_COMPLETE: "#17794a",
 }
 
 
@@ -107,8 +107,8 @@ AX_GRN_HEADERS = [
 ]
 
 ASN_IMAGES_HEADERS = [
-    "IMAGE ID", "ASN NO", "FILE NAME", "SOURCE", "MIME", "SIZE KB", "STORAGE",
-    "DRIVE FILE ID", "LINK", "UPLOADED AT", "UPLOADED BY", "NOTE",
+    "IMAGE ID", "ASN NO", "FILE NAME", "KIND", "SOURCE", "MIME", "SIZE KB",
+    "STORAGE", "DRIVE FILE ID", "LINK", "UPLOADED AT", "UPLOADED BY", "NOTE",
 ]
 
 IMAGE_DATA_HEADERS = ["IMAGE ID", "SEQ", "CHUNK"]
@@ -137,10 +137,13 @@ DEFAULT_SETTINGS = [
     ["CHECK_LOT", "Y", "Lot number compare කරන්නද? (Y/N)"],
     ["CHECK_ASN_NO", "Y", "Inventory ASN number compare කරන්නද? (Y/N)"],
     ["FLAG_EXTRA", "Y", "ASN එකේ නැති HU inventory එකේ තිබ්බොත් flag කරන්නද? (Y/N)"],
-    ["IMAGE_STORAGE", "SHEET", "Images කොහෙද save කරන්නේ? SHEET (default, safe) | DRIVE"],
+    ["IMAGE_STORAGE", "DRIVE", "Images/PDF කොහෙද save කරන්නේ? DRIVE (fail වුණොත් SHEET) | SHEET"],
     ["IMAGE_MAX_PX", "1400", "Image එකේ උපරිම දිග/පළල (px) — ඊට වඩා ලොකු නම් resize"],
     ["IMAGE_QUALITY", "78", "JPEG compress quality (40-95)"],
-    ["DRIVE_FOLDER_ID", "", "IMAGE_STORAGE=DRIVE නම් images යන Drive folder ID එක"],
+    ["DRIVE_FOLDER_ID", "https://drive.google.com/drive/u/2/folders/14t0faZpeMAZIxMAV9q7fQB1ryN1Ps7mP",
+     "Images/PDF යන Drive folder එක — link එකක් හෝ ID එකක් දාන්න පුළුවන්"],
+    ["API_RATE_LIMIT", "55", "විනාඩියකට Google API calls උපරිමය (Google limit = 60)"],
+    ["CACHE_TTL", "90", "Sheet data cache තත්පර ගණන"],
     ["EMAIL_TO", "", "Discrepancy email එකේ default To"],
     ["EMAIL_CC", "", "Discrepancy email එකේ default CC"],
     ["COMPANY", "EFL", "Report/email වල පෙන්නන company නම"],
