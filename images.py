@@ -1,19 +1,16 @@
 """
 images.py
 =========
-ASN images save/load කරන කොටස.
+Saves and loads ASN attachments - both photos and PDF documents.
 
-ප්‍රශ්නය: Google **service account** එකකට තමන්ගේම Drive storage quota නෑ.
-ඒ නිසා folder එකක් share කරලා නැත්නම් Drive upload එක `storageQuotaExceeded`
-වෙලා fail වෙනවා — ඒකයි images save නොවුණේ.
+Primary storage is the Google Drive folder configured in SETTINGS
+(IMAGE_STORAGE = DRIVE). Images are resized and JPEG compressed first;
+PDFs are stored untouched.
 
-විසඳුම: default විදිහට images **Google Sheet එකේම** save වෙනවා.
-  * Pillow එකෙන් resize + JPEG compress (කුඩා කරලා)
-  * base64 කරලා chunks වලට කඩලා `IMAGE_DATA` sheet එකට
-  * `ASN_IMAGES` sheet එකේ metadata (ASN, file name, size, storage)
-
-Drive එක ඕන නම් SETTINGS -> IMAGE_STORAGE = DRIVE කරන්න. Drive fail වුණොත්
-automatic ව Sheet එකට fallback වෙනවා — image එක **කවදාවත් නැති වෙන්නේ නෑ**.
+If Drive is unavailable - a service account has no storage quota of its
+own, so an unshared folder fails - the file falls back to the Google
+Sheet itself: base64 in chunks in IMAGE_DATA, metadata in ASN_IMAGES.
+An attachment is therefore never lost.
 """
 from __future__ import annotations
 
@@ -28,19 +25,16 @@ import gsheets
 import schema
 from matching import now_str, nkey
 
-# Google Sheets cell limit = 50,000 chars. ආරක්ෂිතව 40,000.
+# Google Sheets caps a cell at 50,000 characters; 40,000 leaves headroom.
 CHUNK = 40_000
-# Sheet එකේ save කරන්න ඉඩ දෙන උපරිම compressed size
+# Largest payload accepted for sheet storage
 MAX_BYTES = 3_000_000
 
 
 # ───────────────────────── compression ─────────────────────────
 def compress(data: bytes, mime: str, max_px: int = 1400,
              quality: int = 78) -> tuple[bytes, str]:
-    """
-    Image එක කුඩා කරනවා. Pillow නැත්නම් original එකම return කරනවා.
-    return: (bytes, mime)
-    """
+    """Shrink an image. Returns the original bytes if Pillow is unavailable."""
     try:
         from PIL import Image
     except Exception:
@@ -85,11 +79,12 @@ def save_image(asn: str, filename: str, data: bytes, mime: str,
                source: str = "MANUAL UPLOAD", user: str = "",
                note: str = "", kind: str = "") -> tuple[bool, str]:
     """
-    Image එකක් හෝ PDF එකක් save කරනවා.  return: (ok, message)
-    IMAGE_STORAGE=DRIVE නම් මුලින්ම Drive, fail වුණොත් Sheet එකට fallback.
+    Save an image or PDF. Returns (ok, message).
+    With IMAGE_STORAGE=DRIVE the file goes to Drive first and falls back
+    to the sheet if that fails.
     """
     if not data:
-        return False, f"{filename}: file එක හිස්."
+        return False, f"{filename}: the file is empty."
 
     mode, px, q = _opts()
     is_pdf = (str(mime).lower() == "application/pdf"
@@ -97,7 +92,7 @@ def save_image(asn: str, filename: str, data: bytes, mime: str,
     kind = kind or ("PDF" if is_pdf else "IMAGE")
 
     if is_pdf:
-        small, mime2 = data, "application/pdf"      # PDF compress කරන්නේ නෑ
+        small, mime2 = data, "application/pdf"      # PDFs are stored as-is
     else:
         small, mime2 = compress(data, mime, px, q)
     img_id = uuid.uuid4().hex[:10].upper()
@@ -105,21 +100,22 @@ def save_image(asn: str, filename: str, data: bytes, mime: str,
     storage, link, file_id = "SHEET", "", ""
     msg = ""
 
-    # ── 1. Drive (optional) ──
+    # ── 1. Drive ──
     if mode == "DRIVE":
         folder = gsheets.settings_dict().get("DRIVE_FOLDER_ID", "")
         ok, res = drive.upload_image(small, f"{nkey(asn)}_{filename}", mime2, folder)
         if ok:
             storage, link, file_id = "DRIVE", res["link"], res["id"]
         else:
-            msg = f"Drive fail → Sheet එකට save කළා ({str(res)[:120]})"
+            msg = (f"{filename}: Drive upload failed, saved to the sheet "
+                   f"instead ({str(res)[:140]})")
 
-    # ── 2. Sheet එකට bytes ──
+    # ── 2. fall back to the sheet ──
     if storage == "SHEET":
         if len(small) > MAX_BYTES:
-            return False, (f"{filename}: file එක ලොකු වැඩියි "
-                           f"({len(small) // 1024} KB) — Sheet එකේ තියාගන්න බෑ. "
-                           f"Drive folder එක හදාගන්න, නැත්නම් පොඩි එකක් දාන්න.")
+            return False, (f"{filename}: too large for sheet storage "
+                           f"({len(small) // 1024} KB). Fix the Drive folder "
+                           f"or upload a smaller file.")
         b64 = base64.b64encode(small).decode("ascii")
         chunks = [b64[i:i + CHUNK] for i in range(0, len(b64), CHUNK)]
         gsheets.append_rows("IMAGE_DATA",
@@ -145,7 +141,7 @@ def save_image(asn: str, filename: str, data: bytes, mime: str,
 
 # ───────────────────────── load ─────────────────────────
 def load_image(img_id: str) -> bytes | None:
-    """IMAGE_DATA sheet එකෙන් chunks එකතු කරලා bytes ආපහු දෙනවා."""
+    """Reassemble the chunks in IMAGE_DATA back into bytes."""
     df = gsheets.get_df("IMAGE_DATA")
     if df.empty:
         return None
@@ -162,7 +158,7 @@ def load_image(img_id: str) -> bytes | None:
 
 # ───────────────────────── delete ─────────────────────────
 def delete_images(img_ids: list[str]) -> int:
-    """Metadata + chunks දෙකම අයින් කරනවා."""
+    """Remove both the metadata row and the stored chunks."""
     ids = {str(i).strip() for i in img_ids if str(i).strip()}
     if not ids:
         return 0
@@ -172,7 +168,7 @@ def delete_images(img_ids: list[str]) -> int:
 
 
 def delete_for_asn(asns: list[str]) -> int:
-    """ASN එකකට අදාළ හැම image එකක්ම අයින්."""
+    """Remove every attachment belonging to the given ASNs."""
     meta = gsheets.get_df("ASN_IMAGES")
     if meta.empty:
         return 0

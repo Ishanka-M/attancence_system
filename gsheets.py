@@ -3,15 +3,13 @@ gsheets.py
 ==========
 Google Sheets backend.
 
-වැඩ:
-  1. Service account credentials වලින් gspread client එකක් (st.secrets).
-  2. Spreadsheet එක open / create.
-  3. ensure_all() -> schema.SHEETS එකේ **නැති හැම tab එකක්ම AUTO-CREATE**,
-     headers දාලා, masters (USER-M / SETTINGS) seed කරලා.
+Responsibilities:
+  1. Build a gspread client from service account credentials (st.secrets).
+  2. Open or create the spreadsheet.
+  3. ensure_all() - AUTO-CREATE every missing tab in schema.SHEETS, write
+     headers and seed the master sheets (USER-M / SETTINGS).
   4. read / append / overwrite / upsert helpers.
-
-"ඕනේ කරන හැම Sheet එකක්ම Auto හදාගන්න ඕනේ" කියන requirement එක
-implement වෙන්නේ ensure_all() එකෙන්.
+  5. An API manager that rate limits and retries Google API calls.
 """
 from __future__ import annotations
 
@@ -35,14 +33,14 @@ SCOPES = [
 
 # ═══════════════════════════════════════════════════════════════════
 #  API MANAGER
-#  Google Sheets API quota = user එකකට විනාඩියකට request 60ක් (default).
-#  ඒක ඉක්මවලා ගියොත් 429 එනවා. මේ layer එකෙන්:
-#     * විනාඩියකට calls ගණන track කරලා ඕන නම් රැඳෙනවා (rate limit)
-#     * 429 / 500 / 503 වලට exponential backoff + jitter retry
-#     * call ගණන, retry ගණන, error ගණන stats විදිහට තියාගන්නවා
+#  The Sheets API allows about 60 requests per minute per user. Going
+#  over that returns 429. This layer:
+#     * tracks calls per minute and waits when the limit is close
+#     * retries 429 / 500 / 503 with exponential backoff and jitter
+#     * keeps call, retry and error counters for the Setup page
 # ═══════════════════════════════════════════════════════════════════
-API_WINDOW = 60.0           # තත්පර
-API_MAX_PER_WINDOW = 55     # 60ට ටිකක් පහළින් ආරක්ෂිතව
+API_WINDOW = 60.0           # seconds
+API_MAX_PER_WINDOW = 55     # stay a little under the Google limit
 API_MAX_RETRIES = 5
 
 _lock = threading.Lock()
@@ -54,7 +52,7 @@ RETRY_CODES = {429, 500, 502, 503, 504}
 
 
 def _status_of(err) -> int:
-    """gspread APIError / googleapiclient HttpError එකෙන් HTTP code එක."""
+    """Extract the HTTP status code from a gspread or googleapiclient error."""
     for attr in ("response", "resp"):
         r = getattr(err, attr, None)
         code = getattr(r, "status_code", None) or getattr(r, "status", None)
@@ -71,7 +69,7 @@ def _status_of(err) -> int:
 
 
 def _throttle():
-    """විනාඩියේ limit එකට ආවොත් ටිකක් රැඳෙනවා."""
+    """Wait if the per-minute call limit has been reached."""
     with _lock:
         now = time.time()
         while _calls and now - _calls[0] > API_WINDOW:
@@ -95,8 +93,8 @@ def _throttle():
 
 def api(fn, *args, **kwargs):
     """
-    Google API call එකක් රැකවරණය සහිතව run කරනවා.
-    Quota / server errors වලට automatic retry, අනිත් errors කෙළින්ම raise.
+    Run a Google API call safely.
+    Quota and server errors are retried; anything else is raised as-is.
     """
     delay = 1.0
     last = None
@@ -138,7 +136,7 @@ def api_reset_stats():
 
 
 def apply_api_settings(d: dict | None = None):
-    """SETTINGS sheet එකේ API_RATE_LIMIT / CACHE_TTL අගයන් apply කරනවා."""
+    """Apply API_RATE_LIMIT / CACHE_TTL from the SETTINGS sheet."""
     global API_MAX_PER_WINDOW
     try:
         d = d if d is not None else settings_dict()
@@ -162,14 +160,14 @@ def get_client() -> gspread.Client:
 
 @st.cache_resource(show_spinner=False)
 def get_spreadsheet():
-    """secrets එකේ spreadsheet_id / spreadsheet_name අනුව open. නැත්නම් create."""
+    """Open the spreadsheet named in secrets, creating it if needed."""
     client = get_client()
     cfg = st.secrets.get("app", {})
     sid = str(cfg.get("spreadsheet_id", "")).strip()
     name = str(cfg.get("spreadsheet_name", "EFL ASN GRN System")).strip()
     sa_email = dict(st.secrets["gcp_service_account"]).get("client_email", "?")
 
-    # මුළු URL එකක් දාලා නම් ID එක extract කරනවා
+    # accept a full spreadsheet URL and pull the id out of it
     if "docs.google.com" in sid and "/d/" in sid:
         sid = sid.split("/d/")[1].split("/")[0]
 
@@ -178,11 +176,12 @@ def get_spreadsheet():
             return api(client.open_by_key, sid)
         except gspread.exceptions.APIError as e:
             raise RuntimeError(
-                f"Sheet එක open කරන්න බෑ (id='{sid}').\n\n"
-                f"1) spreadsheet_id එක හරිද බලන්න — URL එකේ /d/ සහ /edit අතර කොටස විතරයි.\n"
-                f"2) Sheet එක මේ service account එකට Editor විදිහට share කරන්න:\n"
-                f"   👉 {sa_email}\n\n"
-                f"නැත්නම් spreadsheet_id හිස් තියලා app එකට අලුත් එකක් හදන්න දෙන්න."
+                f"Cannot open the spreadsheet (id='{sid}').\n\n"
+                f"1) Check spreadsheet_id - it is only the part of the URL "
+                f"between /d/ and /edit.\n"
+                f"2) Share the sheet with this service account as an Editor:\n"
+                f"   {sa_email}\n\n"
+                f"Or leave spreadsheet_id empty and let the app create a new one."
             ) from e
 
     try:
@@ -203,7 +202,7 @@ def spreadsheet_url() -> str:
 
 
 def _update(ws, values, rng="A1"):
-    """gspread 5/6 දෙකේම වැඩ කරන update wrapper."""
+    """Update wrapper that works with both gspread 5 and 6."""
     try:
         api(ws.update, values=values, range_name=rng, value_input_option="USER_ENTERED")
     except TypeError:                                     # pragma: no cover
@@ -212,10 +211,9 @@ def _update(ws, values, rng="A1"):
 
 def _ws(sheet_key: str):
     """
-    Worksheet එක ගන්නවා — නැත්නම් **ඒ මොහොතේම හදනවා** (headers + seed සමග).
-
-    Setup page එකේ 🏗️ button එක ඔබලා නැතත්, ලියන්න යද්දී sheet එක නැත්නම්
-    WorksheetNotFound error එකක් වෙනුවට tab එක auto-create වෙනවා.
+    Return the worksheet, creating it on the spot (with headers and seed
+    rows) if it does not exist yet, so a write never fails with
+    WorksheetNotFound.
     """
     sh = get_spreadsheet()
     cfg = schema.SHEETS[sheet_key]
@@ -231,7 +229,7 @@ def _ws(sheet_key: str):
         get_df.clear()
         return ws
 
-    # තියෙන sheet එකේ header row එක හිස්නම් දාගන්නවා
+    # fill in the header row if the existing sheet is blank
     try:
         if not any(str(c).strip() for c in api(ws.row_values, 1)):
             _update(ws, [headers])
@@ -244,11 +242,11 @@ def _ws(sheet_key: str):
 # ───────────────────────── AUTO-CREATE sheets ─────────────────────────
 def ensure_all(seed_masters: bool = True) -> tuple[list[str], list[str]]:
     """
-    schema.SHEETS එකේ හැම sheet එකක්ම තියෙනවද බලලා නැති ඒවා auto-create කරනවා.
-    දැනටමත් තියෙන sheet එකක අලුත් column එකක් schema එකට එකතු වෙලා නම්,
-    ඒ header එකත් auto-add කරනවා (data නැති නොවී).
+    Create every sheet in schema.SHEETS that does not exist yet. If a new
+    column was added to the schema, append that header to the existing
+    sheet without losing data.
 
-    return: (created_titles, patched_titles)
+    Returns (created_titles, patched_titles).
     """
     sh = get_spreadsheet()
     existing = {ws.title: ws for ws in api(sh.worksheets)}
@@ -273,7 +271,7 @@ def ensure_all(seed_masters: bool = True) -> tuple[list[str], list[str]]:
                 patched.append(title)
             continue
 
-        # ── අලුත් tab එක auto-create ──
+        # ── create the missing tab ──
         ws = api(sh.add_worksheet, title=title, rows=2000, cols=max(len(headers), 12))
         rows = [headers]
         if seed_masters and cfg.get("seed"):
@@ -281,9 +279,9 @@ def ensure_all(seed_masters: bool = True) -> tuple[list[str], list[str]]:
         _update(ws, rows)
         created.append(title)
         existing[title] = ws
-        time.sleep(0.2)          # API quota එකට ගරු කරනවා
+        time.sleep(0.2)          # be gentle with the API quota
 
-    # create වෙද්දි ආපු default හිස් "Sheet1" එක අයින්
+    # remove the default empty "Sheet1" created with a new spreadsheet
     try:
         titles = {w.title for w in api(sh.worksheets)}
         if len(titles) > 1 and "Sheet1" in titles:
@@ -298,9 +296,9 @@ def ensure_all(seed_masters: bool = True) -> tuple[list[str], list[str]]:
 @st.cache_resource(show_spinner=False)
 def ensure_missing_once() -> list[str]:
     """
-    App එක පටන් ගද්දී වරක් — **නැති tabs විතරක්** හදනවා.
-    API call එකයි (worksheets list) + නැති ඒවාට create එකයි විතරයි,
-    ඒ නිසා ensure_all() එක වගේ බර නෑ.
+    Run once at start-up and create only the missing tabs. Costs one
+    worksheets() call plus a create per missing tab, so it is much
+    lighter than ensure_all().
     """
     created = []
     try:
@@ -322,7 +320,7 @@ def ensure_missing_once() -> list[str]:
         if created:
             get_df.clear()
     except Exception:
-        pass                      # fail වුණත් app එක නවතින්නේ නෑ — _ws() එකෙන් හැදෙනවා
+        pass                      # never block start-up; _ws() creates on demand
     return created
 
 
@@ -352,7 +350,7 @@ def sheet_status() -> pd.DataFrame:
 # ───────────────────────── read / write ─────────────────────────
 @st.cache_data(ttl=90, show_spinner=False)
 def get_df(sheet_key: str) -> pd.DataFrame:
-    """Worksheet එකක් DataFrame විදිහට කියවනවා (90s cache)."""
+    """Read a worksheet into a DataFrame (cached)."""
     sh = get_spreadsheet()
     cfg = schema.SHEETS[sheet_key]
     try:
@@ -387,7 +385,7 @@ def append_rows(sheet_key: str, rows: list[list]):
 
 
 def overwrite(sheet_key: str, df: pd.DataFrame):
-    """Sheet එක clear කරලා DataFrame එකම නැවත ලියනවා."""
+    """Clear the sheet and rewrite it from the DataFrame."""
     cfg = schema.SHEETS[sheet_key]
     ws = _ws(sheet_key)
     df = df.reindex(columns=cfg["headers"]).fillna("")
@@ -404,8 +402,8 @@ def overwrite(sheet_key: str, df: pd.DataFrame):
 
 def upsert(sheet_key: str, rows: list[dict]) -> tuple[int, int]:
     """
-    schema එකේ key column එක අනුව upsert.
-    key තියෙනවා නම් UPDATE, නැත්නම් ADD.  return (added, updated)
+    Upsert by the schema key column: update when the key already exists,
+    otherwise append. Returns (added, updated).
     """
     cfg = schema.SHEETS[sheet_key]
     headers, key = cfg["headers"], cfg.get("key")
@@ -423,7 +421,7 @@ def upsert(sheet_key: str, rows: list[dict]) -> tuple[int, int]:
         srow = ["" if r.get(h) is None else str(r.get(h, "")) for h in headers]
         k = srow[ki].strip()
         if k and k in index:
-            # හිස් අගයන් වලින් තියෙන data overwrite නොවෙන්න
+            # do not let blank incoming values wipe existing data
             old = cur[index[k]]
             merged = [new if str(new).strip() != "" else old[i] for i, new in enumerate(srow)]
             cur[index[k]] = merged
@@ -439,7 +437,7 @@ def upsert(sheet_key: str, rows: list[dict]) -> tuple[int, int]:
 
 
 def replace_rows(sheet_key: str, new_df: pd.DataFrame, key_values: list[str]):
-    """key column එකේ දී ඇති values තියෙන rows අයින් කරලා new_df එක දානවා."""
+    """Drop rows whose key is in key_values, then append new_df."""
     cfg = schema.SHEETS[sheet_key]
     key = cfg["key"]
     cur = get_df(sheet_key)
@@ -450,12 +448,55 @@ def replace_rows(sheet_key: str, new_df: pd.DataFrame, key_values: list[str]):
     overwrite(sheet_key, out)
 
 
+def upsert_by(sheet_key: str, rows: list[dict], key_cols: list[str],
+              fallback_cols: list[str] | None = None) -> tuple[int, int]:
+    """
+    Upsert using a composite key (e.g. Invoice Number + Pallet).
+
+    Rows whose key already exists are REPLACED; new keys are appended.
+    If every key column is blank for a row, `fallback_cols` is used
+    instead (e.g. Pallet on its own when the invoice number is missing).
+
+    Returns (added, replaced).
+    """
+    cfg = schema.SHEETS[sheet_key]
+    headers = cfg["headers"]
+
+    def key_of(get) -> str:
+        parts = [str(get(c) or "").strip().upper() for c in key_cols]
+        if not any(parts) and fallback_cols:
+            parts = [str(get(c) or "").strip().upper() for c in fallback_cols]
+        return "|".join(parts)
+
+    cur = get_df(sheet_key)
+    cur_rows = cur.fillna("").astype(str).values.tolist() if not cur.empty else []
+    idx = {}
+    for i, r in enumerate(cur_rows):
+        d = dict(zip(headers, r))
+        k = key_of(d.get)
+        if k.strip("|"):
+            idx[k] = i
+
+    added = replaced = 0
+    for r in rows:
+        srow = ["" if r.get(h) is None else str(r.get(h, "")) for h in headers]
+        k = key_of(r.get)
+        if k.strip("|") and k in idx:
+            cur_rows[idx[k]] = srow          # full replace, not a merge
+            replaced += 1
+        else:
+            cur_rows.append(srow)
+            if k.strip("|"):
+                idx[k] = len(cur_rows) - 1
+            added += 1
+
+    overwrite(sheet_key, pd.DataFrame(cur_rows, columns=headers))
+    return added, replaced
+
+
 # ───────────────────────── delete / reset ─────────────────────────
 def delete_where(sheet_key: str, column: str, values) -> int:
-    """
-    column එකේ අගය `values` ඇතුළේ තියෙන හැම row එකක්ම අයින් කරනවා.
-    return: අයින් වුණ row ගණන.
-    """
+    """Delete every row whose `column` value is in `values`. Returns the count."""
     df = get_df(sheet_key)
     if df.empty or column not in df.columns:
         return 0
@@ -470,7 +511,7 @@ def delete_where(sheet_key: str, column: str, values) -> int:
 
 
 def clear_sheet(sheet_key: str) -> int:
-    """Sheet එකේ data ඔක්කොම අයින් — headers විතරක් තියෙනවා."""
+    """Remove all data rows, keeping only the header row."""
     df = get_df(sheet_key)
     n = len(df)
     overwrite(sheet_key, pd.DataFrame(columns=schema.SHEETS[sheet_key]["headers"]))
@@ -478,7 +519,7 @@ def clear_sheet(sheet_key: str) -> int:
 
 
 def reset_database(keys: list[str]) -> dict[str, int]:
-    """දුන්න sheets ඔක්කොම clear කරනවා. return: {sheet: deleted_rows}"""
+    """Clear every listed sheet. Returns {sheet: deleted_rows}."""
     out = {}
     for k in keys:
         if k in schema.SHEETS:

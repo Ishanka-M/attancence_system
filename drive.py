@@ -3,16 +3,14 @@ drive.py
 ========
 Google Drive upload helper.
 
-වැදගත්: Google **service account** එකකට තමන්ගේම Drive storage quota නෑ.
-ඒ නිසා —
-  * folder එක ඔයාගේ Drive එකේ එකක් නම්, ඒක service account email එකට
-    **Editor** විදිහට share කරලා තියෙන්න ඕනේ;
-  * ඒත් සමහර Google policy යටතේ My Drive folder එකකට service account
-    එකකින් upload කරද්දී `storageQuotaExceeded` එනවා. එහෙම නම්
-    **Shared Drive** එකක් පාවිච්චි කරන්න.
+A Google service account has no Drive storage quota of its own, so:
+  * a folder in your own Drive must be shared with the service account
+    email as an Editor;
+  * under some Google policies an upload into a My Drive folder still
+    returns storageQuotaExceeded - use a Shared Drive in that case.
 
-Upload එක fail වුණොත් images.py එකෙන් automatic ව Google Sheet එකට
-fallback වෙනවා — ඒ නිසා image එකක් කවදාවත් නැති වෙන්නේ නෑ.
+If the upload fails, images.py falls back to the Google Sheet, so an
+attachment is never lost.
 """
 from __future__ import annotations
 
@@ -41,7 +39,7 @@ def _service():
 
 def folder_id(value: str) -> str:
     """
-    Drive folder link එකක් හෝ ID එකක් -> පිරිසිදු ID එක.
+    Turn a Drive folder link or raw id into a clean folder id.
 
     https://drive.google.com/drive/u/2/folders/14t0fa...Ps7mP?usp=sharing
         -> 14t0fa...Ps7mP
@@ -80,30 +78,29 @@ def service_email() -> str:
 
 
 def check_folder(fid: str) -> tuple[bool, str]:
-    """Folder එකට access තියෙනවද කියලා බලනවා. return (ok, message)"""
+    """Check whether the folder is reachable. Returns (ok, message)."""
     if not available():
-        return False, "google-api-python-client install වෙලා නෑ."
+        return False, "google-api-python-client is not installed."
     fid = folder_id(fid)
     if not fid:
-        return False, "Folder ID එකක් දීලා නෑ."
+        return False, "No folder id or link has been configured."
     try:
         svc = _service()
         f = api(svc.files().get(fileId=fid, fields="id,name,mimeType,driveId",
                                 supportsAllDrives=True).execute)
         kind = "Shared Drive" if f.get("driveId") else "My Drive"
-        return True, f"✅ `{f.get('name')}` ({kind}) — access තියෙනවා."
+        return True, f"Connected to `{f.get('name')}` ({kind})."
     except Exception as e:
-        return False, (f"❌ Folder එකට access නෑ ({type(e).__name__}). "
-                       f"Folder එක මේ email එකට **Editor** විදිහට share කරන්න: "
-                       f"`{service_email()}`")
+        return False, (f"No access to that folder ({type(e).__name__}). "
+                       f"Share it as an Editor with `{service_email()}`.")
 
 
 def upload_image(data: bytes, filename: str, mime: str,
                  folder: str = "") -> tuple[bool, dict | str]:
-    """return: (True, {"id","link","name"})  |  (False, "error message")"""
+    """Returns (True, {"id","link","name"}) or (False, "error message")."""
     if not available():
-        return False, ("google-api-python-client install වෙලා නෑ. "
-                       "`pip install google-api-python-client` කරන්න.")
+        return False, ("google-api-python-client is not installed. "
+                       "Run `pip install google-api-python-client`.")
     try:
         from googleapiclient.http import MediaIoBaseUpload
         svc = _service()
@@ -121,7 +118,7 @@ def upload_image(data: bytes, filename: str, mime: str,
                 fileId=f["id"], body={"type": "anyone", "role": "reader"},
                 supportsAllDrives=True).execute)
         except Exception:
-            pass                      # link share fail වුණත් file එක තියෙනවා
+            pass                      # the file exists even if link sharing fails
         return True, {
             "id": f["id"],
             "name": f.get("name", filename),
@@ -131,9 +128,8 @@ def upload_image(data: bytes, filename: str, mime: str,
     except Exception as e:
         msg = str(e)
         if "storageQuota" in msg or "quota" in msg.lower():
-            msg = ("Service account එකට Drive storage quota නෑ. Folder එක "
-                   "**Shared Drive** එකක තියෙන එකක් කරන්න, නැත්නම් Setup එකේ "
-                   "Image storage = SHEET කරන්න.")
+            msg = ("The service account has no Drive storage quota. Move the "
+                   "folder into a Shared Drive, or set Storage = SHEET in Setup.")
         return False, f"{type(e).__name__}: {msg[:220]}"
 
 

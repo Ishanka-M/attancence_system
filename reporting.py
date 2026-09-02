@@ -1,8 +1,8 @@
 """
 reporting.py
 ============
-  * build_excel()        -> Summary + Details sheets තියෙන .xlsx bytes
-  * discrepancy_email()  -> විස්තර සහිත Markdown email එකක් (code block එකට)
+  * build_excel()        -> .xlsx bytes with Summary and Details sheets
+  * discrepancy_email()  -> a detailed Markdown email ready to copy out
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from parsing import clean, to_num, fmt_num
 #  Excel
 # ═══════════════════════════════════════════════════════════════════
 def build_excel(sheets: dict[str, pd.DataFrame]) -> bytes:
-    """{'Summary': df, 'Details': df} -> xlsx bytes (header styling + autofit)."""
+    """{'Summary': df, 'Details': df} -> xlsx bytes with styled headers."""
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as xw:
         for name, df in sheets.items():
@@ -88,11 +88,14 @@ def _md_table(df: pd.DataFrame, cols: list[str], limit: int = 60) -> str:
 def discrepancy_email(summary: pd.DataFrame, disc: pd.DataFrame,
                       *, company="EFL", site="", client="",
                       prepared_by="", to="", cc="",
-                      run_id="", inventory_note="") -> tuple[str, str]:
+                      run_id="", inventory_note="", auto=False) -> tuple[str, str]:
     """
-    return: (subject, markdown_body)
-    summary : ASN_SUMMARY rows (බලපාන ASN විතරක්)
+    Build the discrepancy email.
+
+    summary : ASN_SUMMARY rows for the affected ASNs
     disc    : DISCREPANCY rows
+    auto    : True when generated automatically after an inventory upload
+    returns : (subject, markdown_body)
     """
     today = datetime.now().strftime("%d-%b-%Y")
     ts = datetime.now().strftime("%d-%b-%Y %H:%M")
@@ -101,11 +104,13 @@ def discrepancy_email(summary: pd.DataFrame, disc: pd.DataFrame,
 
     n_disc = len(disc)
     n_high = int((disc["SEVERITY"] == "HIGH").sum()) if n_disc else 0
-    subject = (f"[{company}{' / ' + site if site else ''}] ASN vs Korber GRN Discrepancy Report "
+    subject = (f"[{company}{' / ' + site if site else ''}] ASN vs Korber GRN "
+               f"{'Mismatch Alert' if auto else 'Discrepancy Report'} "
                f"— {today} — {n_disc} issue(s) on {len(asns)} ASN")
 
     L: list[str] = []
-    L.append(f"# ASN ↔ Korber GRN Discrepancy Report")
+    L.append("# ASN vs Korber GRN "
+             + ("Mismatch Alert" if auto else "Discrepancy Report"))
     L.append("")
     L.append(f"**To:** {to or '—'}  ")
     L.append(f"**Cc:** {cc or '—'}  ")
@@ -132,6 +137,8 @@ def discrepancy_email(summary: pd.DataFrame, disc: pd.DataFrame,
     L.append("| --- | --- |")
     L.append(f"| Report generated | {ts} |")
     L.append(f"| Prepared by | {prepared_by or '—'} |")
+    if auto:
+        L.append("| Trigger | Generated automatically on inventory upload |")
     L.append(f"| Site / Warehouse | {site or '—'} |")
     L.append(f"| Client | {client or '—'} |")
     L.append(f"| ASN reference(s) | {asn_txt or '—'} |")

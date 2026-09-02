@@ -1,18 +1,18 @@
 """
 matching.py
 ===========
-ASN ↔ Korber Inventory reconciliation engine.
+ASN to Korber inventory reconciliation engine.
 
 Logic:
-  * ප්‍රධාන key එක = HU ID  (ASN: HU_ID  |  Inventory: Pallet)
-  * HU එක inventory එකේ නැත්නම්        -> MISSING IN INVENTORY  (GRN තාම නෑ)
-  * තියෙනවා නම් Qty / Item / Lot / ASN No compare කරනවා
-      - ඔක්කොම හරි                     -> MATCHED  -> KORBER GRN = DONE
-      - වෙනසක්                          -> QTY / ITEM / LOT / WRONG ASN MISMATCH
-  * ASN එකේ නැති HU එකක් inventory එකේ එකම ASN number එකට තියෙනවා නම්
-                                        -> EXTRA IN INVENTORY
+  * primary key = HU ID  (ASN: HU_ID  |  Inventory: Pallet)
+  * HU not in inventory          -> MISSING IN INVENTORY (GRN not done yet)
+  * HU found                     -> compare Qty / Item / Lot / ASN No
+      - everything agrees        -> MATCHED -> KORBER GRN = DONE
+      - a difference             -> QTY / ITEM / LOT / WRONG ASN mismatch
+  * HU in inventory under the same ASN but absent from the ASN document
+                                 -> EXTRA IN INVENTORY
 
-ASN එකේ හැම line එකක්ම MATCHED නම් -> ASN status = KORBER GRN DONE.
+When every line of an ASN is MATCHED the ASN becomes KORBER GRN DONE.
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from parsing import clean, to_num, fmt_num
 
 # ───────────────────────── normalisers ─────────────────────────
 def nkey(v) -> str:
-    """HU / item / lot compare කරන්න uppercase + trim + inner space squash."""
+    """Normalise a value for comparison: trim, uppercase, squash inner spaces."""
     return " ".join(str(v or "").strip().upper().split())
 
 
@@ -50,9 +50,8 @@ def run_id() -> str:
 # ───────────────────────── inventory index ─────────────────────────
 def build_inventory_index(inv: pd.DataFrame, cfg: dict) -> dict:
     """
-    Pallet (HU) එක අනුව inventory එක index කරනවා.
-    එකම pallet එකට rows කිහිපයක් තිබ්බොත් qty එකතු කරලා meta එකතු කරනවා.
-    inv: canonical INV columns (PALLET, ACTUAL_QTY, ...)
+    Index the inventory by pallet (HU). When one pallet has several rows the
+    quantities are summed and the metadata is merged.
     """
     client = cfg.get("client", "")
     strip = cfg.get("strip_prefix", True)
@@ -97,7 +96,7 @@ def build_inventory_index(inv: pd.DataFrame, cfg: dict) -> dict:
 
 
 def inventory_by_asn(inv: pd.DataFrame, cfg: dict) -> dict[str, set]:
-    """normalised ASN number -> {HU set}  (EXTRA detect කරන්න)"""
+    """Normalised ASN number -> set of HUs, used to detect extra HUs."""
     client = cfg.get("client", "")
     strip = cfg.get("strip_prefix", True)
     out: dict[str, set] = {}
@@ -113,7 +112,7 @@ def inventory_by_asn(inv: pd.DataFrame, cfg: dict) -> dict[str, set]:
 
 # ───────────────────────── line level ─────────────────────────
 def _compare_line(line: dict, inv_rec: dict | None, cfg: dict) -> dict:
-    """ASN line එකක් inventory record එකට compare කරලා result dict එකක්."""
+    """Compare one ASN line against its inventory record."""
     tol = cfg.get("qty_tolerance", 0.0)
     client = cfg.get("client", "")
     strip = cfg.get("strip_prefix", True)
@@ -178,7 +177,7 @@ def _compare_line(line: dict, inv_rec: dict | None, cfg: dict) -> dict:
     else:
         res["MATCH STATUS"] = schema.M_MATCHED
         res["DISCREPANCY"] = ""
-        res["KORBER GRN"] = schema.K_DONE           # ← tally වුණා = Korber GRN Done
+        res["KORBER GRN"] = schema.K_DONE           # tallied -> Korber GRN done
 
     return res
 
@@ -187,9 +186,9 @@ def _compare_line(line: dict, inv_rec: dict | None, cfg: dict) -> dict:
 def reconcile(detail: pd.DataFrame, inv: pd.DataFrame, cfg: dict,
               rid: str | None = None) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     """
-    detail : ASN_DETAIL sheet format එකේ DataFrame (check කරන්න ඕන ASN lines)
+    detail : ASN lines in ASN_DETAIL format
     inv    : canonical inventory DataFrame
-    return : (updated_detail, extra_rows_df, stats)
+    returns: (updated_detail, extra_rows_df, stats)
     """
     rid = rid or run_id()
     ts = now_str()
@@ -204,7 +203,7 @@ def reconcile(detail: pd.DataFrame, inv: pd.DataFrame, cfg: dict,
             out[col] = ""
 
     seen_hu: dict[str, set] = {}
-    asn_display: dict[str, str] = {}       # normalised ASN -> ASN doc එකේ තිබ්බ නම
+    asn_display: dict[str, str] = {}       # normalised ASN -> name used in the document
 
     for i, row in out.iterrows():
         line = {
@@ -223,7 +222,7 @@ def reconcile(detail: pd.DataFrame, inv: pd.DataFrame, cfg: dict,
         seen_hu.setdefault(a, set()).add(hu)
         asn_display.setdefault(a, clean(row.get("ASN NO")) or a)
 
-    # ── EXTRA: inventory එකේ තියෙන, ASN doc එකේ නැති HU ──
+    # ── EXTRA: HUs in inventory that the ASN document does not list ──
     extra_rows = []
     if cfg.get("flag_extra", True):
         for a, hus in seen_hu.items():
@@ -284,7 +283,7 @@ def asn_status(matched: int, missing: int, mismatch: int, extra: int,
 
 
 def summarise_asn(detail: pd.DataFrame, extra: pd.DataFrame | None = None) -> pd.DataFrame:
-    """ASN_DETAIL rows -> ASN එක එකට summary rows (recon numbers සමග)."""
+    """Roll ASN_DETAIL rows up into one summary row per ASN."""
     if detail is None or detail.empty:
         return pd.DataFrame(columns=schema.ASN_SUMMARY_HEADERS)
 
@@ -338,6 +337,12 @@ def summarise_asn(detail: pd.DataFrame, extra: pd.DataFrame | None = None) -> pd
 
 
 # ───────────────────────── discrepancy extraction ─────────────────────────
+def disc_id(asn, hu, seq=0) -> str:
+    """Stable discrepancy id built from ASN number and HU id."""
+    a, h = nkey(asn), nkey(hu)
+    return f"{a}|{h}" if (a or h) else f"LINE-{seq + 1:04d}"
+
+
 SEVERITY = {
     schema.M_MISSING: "HIGH",
     schema.M_QTY: "HIGH",
@@ -350,7 +355,7 @@ SEVERITY = {
 
 def discrepancy_rows(detail: pd.DataFrame, extra: pd.DataFrame | None,
                      rid: str) -> pd.DataFrame:
-    """tally නොවෙච්ච ඔක්කොම -> DISCREPANCY sheet format."""
+    """Every line that did not tally, in DISCREPANCY sheet format."""
     frames = []
     if detail is not None and not detail.empty:
         bad = detail[~detail["MATCH STATUS"].astype(str).isin([schema.M_MATCHED, ""])]
@@ -366,8 +371,10 @@ def discrepancy_rows(detail: pd.DataFrame, extra: pd.DataFrame | None,
     for i, r in allbad.iterrows():
         stt = str(r.get("MATCH STATUS", ""))
         sev = SEVERITY.get(stt, "HIGH" if "MISMATCH" in stt else "MEDIUM")
+        # Deterministic id: the same ASN + HU always maps to the same record,
+        # so re-running reconciliation updates it instead of adding a duplicate.
         rows.append({
-            "DISC ID": f"{rid}-{i + 1:04d}",
+            "DISC ID": disc_id(r.get("ASN NO"), r.get("HU ID"), i),
             "RUN ID": rid,
             "GENERATED AT": ts,
             "ASN NO": clean(r.get("ASN NO")),

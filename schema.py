@@ -1,20 +1,20 @@
 """
 schema.py
 =========
-Google Sheet එකේ හැම worksheet (tab) එකකම නම + columns මෙතන define කරනවා.
-gsheets.ensure_all() මේ schema එක කියවලා **නැති හැම sheet එකක්ම AUTO-CREATE** කරනවා.
+Defines every worksheet (tab) in the Google Sheet and its columns.
+gsheets.ensure_all() reads this schema and AUTO-CREATES any missing tab.
 
-සෑම sheet එකකම:
-  - title   : Google Sheet tab එකේ නම
+Each sheet entry has:
+  - title   : the Google Sheet tab name
   - headers : column header list
   - kind    : "master" | "data" | "log"
-  - key     : upsert කරද්දී භාවිතා කරන unique column එක (තියෙනවා නම්)
-  - seed    : master sheets වලට default rows
+  - key     : unique column used for upserts (if any)
+  - seed    : default rows for master sheets
 """
 from __future__ import annotations
 
 # ═══════════════════════════════════════════════════════════════════
-#  STATUS CONSTANTS  — code එකේ හැම තැනම මේවා පාවිච්චි කරන්න
+#  STATUS CONSTANTS - used everywhere instead of raw strings
 # ═══════════════════════════════════════════════════════════════════
 
 # Line level match status
@@ -35,6 +35,10 @@ K_DONE = "DONE"
 AX_NA = "-"
 AX_PENDING = "PENDING"
 AX_DONE = "DONE"
+
+D_OPEN = "OPEN"
+D_RESOLVED = "RESOLVED"
+D_CLOSED = "CLOSED"
 
 # ASN level status
 S_NEW = "NEW"
@@ -130,25 +134,28 @@ SETTINGS_HEADERS = ["KEY", "VALUE", "DESCRIPTION"]
 
 
 DEFAULT_SETTINGS = [
-    ["CLIENT_CODE", "HIES", "Default client code (Korber inventory prefix)"],
-    ["STRIP_CLIENT_PREFIX", "Y", "Inventory ASN/Item වල 'HIES-' prefix එක ඉවත් කරලා compare කරන්නද? (Y/N)"],
-    ["QTY_TOLERANCE", "0", "Qty difference එකේ ඉවසන සීමාව (absolute)"],
-    ["CHECK_ITEM", "Y", "Item number compare කරන්නද? (Y/N)"],
-    ["CHECK_LOT", "Y", "Lot number compare කරන්නද? (Y/N)"],
-    ["CHECK_ASN_NO", "Y", "Inventory ASN number compare කරන්නද? (Y/N)"],
-    ["FLAG_EXTRA", "Y", "ASN එකේ නැති HU inventory එකේ තිබ්බොත් flag කරන්නද? (Y/N)"],
-    ["IMAGE_STORAGE", "DRIVE", "Images/PDF කොහෙද save කරන්නේ? DRIVE (fail වුණොත් SHEET) | SHEET"],
-    ["IMAGE_MAX_PX", "1400", "Image එකේ උපරිම දිග/පළල (px) — ඊට වඩා ලොකු නම් resize"],
-    ["IMAGE_QUALITY", "78", "JPEG compress quality (40-95)"],
+    ["CLIENT_CODE", "HIES", "Client code used as the Korber inventory prefix"],
+    ["STRIP_CLIENT_PREFIX", "Y", "Strip the 'HIES-' prefix from inventory ASN/item before comparing (Y/N)"],
+    ["QTY_TOLERANCE", "0", "Allowed absolute quantity difference before a line is flagged"],
+    ["CHECK_ITEM", "Y", "Compare item numbers (Y/N)"],
+    ["CHECK_LOT", "Y", "Compare lot numbers (Y/N)"],
+    ["CHECK_ASN_NO", "Y", "Compare the inventory ASN number (Y/N)"],
+    ["FLAG_EXTRA", "Y", "Flag HUs present in inventory but missing from the ASN document (Y/N)"],
+    ["AUTO_RECON", "Y", "Reconcile automatically as soon as an inventory file is uploaded (Y/N)"],
+    ["AUTO_PUSH_AX", "Y", "Move Korber GRN Done ASNs straight to AX GRN Pending (Y/N)"],
+    ["AUTO_EMAIL", "Y", "Generate the mismatch email automatically after auto reconciliation (Y/N)"],
+    ["IMAGE_STORAGE", "DRIVE", "Where attachments are stored: DRIVE (falls back to SHEET) | SHEET"],
+    ["IMAGE_MAX_PX", "1400", "Maximum image edge in pixels; larger images are resized"],
+    ["IMAGE_QUALITY", "78", "JPEG compression quality (40-95)"],
     ["DRIVE_FOLDER_ID", "https://drive.google.com/drive/u/2/folders/14t0faZpeMAZIxMAV9q7fQB1ryN1Ps7mP",
-     "Images/PDF යන Drive folder එක — link එකක් හෝ ID එකක් දාන්න පුළුවන්"],
-    ["API_RATE_LIMIT", "55", "විනාඩියකට Google API calls උපරිමය (Google limit = 60)"],
-    ["CACHE_TTL", "90", "Sheet data cache තත්පර ගණන"],
-    ["EMAIL_TO", "", "Discrepancy email එකේ default To"],
-    ["EMAIL_CC", "", "Discrepancy email එකේ default CC"],
-    ["COMPANY", "EFL", "Report/email වල පෙන්නන company නම"],
+     "Drive folder for images and PDFs - paste a folder link or an ID"],
+    ["API_RATE_LIMIT", "55", "Maximum Google API calls per minute (Google allows 60)"],
+    ["CACHE_TTL", "90", "Sheet data cache lifetime in seconds"],
+    ["EMAIL_TO", "", "Default To address for discrepancy emails"],
+    ["EMAIL_CC", "", "Default Cc address for discrepancy emails"],
+    ["COMPANY", "EFL", "Company name shown on reports and emails"],
     ["SITE", "EGDC", "Warehouse / site code"],
-    ["ADMIN_PIN", "1234", "Admin actions වලට PIN එක (Setup page එකෙන් වෙනස් කරන්න)"],
+    ["ADMIN_PIN", "1234", "PIN required for admin actions (change it in Setup)"],
 ]
 
 DEFAULT_USERS = [

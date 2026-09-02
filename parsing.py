@@ -1,15 +1,17 @@
 """
 parsing.py
 ==========
-Excel files කියවන කොටස.
+Reads ASN and inventory files - Excel and PDF.
 
-  * list_sheets()          -> workbook එකේ sheet නම් (user ට තෝරන්න)
-  * parse_asn()            -> ASN Excel එකක් -> canonical DataFrame
-  * parse_inventory()      -> Korber Inventory Excel -> canonical DataFrame
-  * extract_images()       -> xlsx එක ඇතුළේ embed වෙලා තියෙන images ඔක්කොම
+  * list_sheets()      -> sheet names in a workbook, for the user to pick
+  * parse_asn()        -> ASN Excel sheet   -> canonical DataFrame
+  * parse_inventory()  -> Korber inventory  -> canonical DataFrame
+  * extract_images()   -> images embedded in an xlsx
+  * list_pdf_tables()  -> tables found in a PDF, best ASN match first
+  * parse_asn_pdf()    -> selected PDF table -> canonical DataFrame
 
-Column නම් වෙනස් වුණත් වැඩ කරන්න ALIAS map එකක් තියෙනවා, header row එක
-මුල් rows 25ක් ඇතුළේ auto-detect කරනවා.
+An alias map keeps this working when column names differ, and the header
+row is auto-detected within the first 25 rows.
 """
 from __future__ import annotations
 
@@ -23,14 +25,14 @@ import pandas as pd
 #  helpers
 # ═══════════════════════════════════════════════════════════════════
 def norm_key(s) -> str:
-    """Column header එකක් compare කරන්න පුළුවන් form එකකට."""
+    """Normalise a column header so it can be compared."""
     s = str(s or "").strip().lower()
     s = re.sub(r"[^a-z0-9]+", "_", s)
     return s.strip("_")
 
 
 def clean(v) -> str:
-    """Cell value එකක් -> පිරිසිදු string (nan/None -> '')."""
+    """Cell value -> clean string (nan/None become '')."""
     if v is None:
         return ""
     s = str(v).strip()
@@ -129,7 +131,7 @@ def _lookup(aliases: dict[str, list[str]]) -> dict[str, str]:
 ASN_LOOKUP = _lookup(ASN_ALIASES)
 INV_LOOKUP = _lookup(INV_ALIASES)
 
-# header row detect කරන්න අවශ්‍ය අවම tokens
+# minimum canonical columns needed to confirm a header row
 ASN_MUST = {"ASN_NO", "HU_ID", "QTY"}
 INV_MUST = {"PALLET", "ACTUAL_QTY"}
 
@@ -138,7 +140,7 @@ INV_MUST = {"PALLET", "ACTUAL_QTY"}
 #  workbook helpers
 # ═══════════════════════════════════════════════════════════════════
 def list_sheets(file_bytes: bytes) -> list[str]:
-    """Workbook එකේ තියෙන sheet නම් — user ට 'මොන sheet එකද?' අහන්න."""
+    """Sheet names in the workbook, so the user can choose one."""
     try:
         return pd.ExcelFile(io.BytesIO(file_bytes)).sheet_names
     except Exception:
@@ -147,8 +149,8 @@ def list_sheets(file_bytes: bytes) -> list[str]:
 
 def _detect_header(raw: pd.DataFrame, lookup: dict, must: set) -> tuple[int, dict]:
     """
-    මුල් rows 25ක් ඇතුළේ header row එක හොයනවා.
-    return: (header_row_index, {col_index: canonical_name})
+    Find the header row within the first 25 rows.
+    Returns (header_row_index, {col_index: canonical_name}).
     """
     best_i, best_map, best_score = -1, {}, 0
     limit = min(25, len(raw))
@@ -175,14 +177,14 @@ def _read_raw(file_bytes: bytes, sheet_name) -> pd.DataFrame:
 # ═══════════════════════════════════════════════════════════════════
 def parse_asn(file_bytes: bytes, sheet_name) -> tuple[pd.DataFrame, dict]:
     """
-    ASN Excel sheet එකක් -> canonical DataFrame.
-    return: (df, meta)   meta = {header_row, mapped, unmapped, sheet}
+    ASN Excel sheet -> canonical DataFrame.
+    Returns (df, meta) where meta = {header_row, mapped, unmapped, sheet}.
     """
     raw = _read_raw(file_bytes, sheet_name)
     if raw.empty:
         return pd.DataFrame(columns=list(ASN_ALIASES)), {
             "header_row": None, "mapped": {}, "unmapped": [], "sheet": sheet_name,
-            "error": "Sheet එක හිස්.",
+            "error": "The sheet is empty.",
         }
 
     hrow, cmap = _detect_header(raw, ASN_LOOKUP, ASN_MUST)
@@ -190,7 +192,8 @@ def parse_asn(file_bytes: bytes, sheet_name) -> tuple[pd.DataFrame, dict]:
         return pd.DataFrame(columns=list(ASN_ALIASES)), {
             "header_row": None, "mapped": {}, "unmapped": list(raw.iloc[0].tolist()),
             "sheet": sheet_name,
-            "error": "ASN columns හඳුනාගන්න බැරි උනා. (ASN number / HU / Qty columns ඕනේ)",
+            "error": ("Could not identify the ASN columns - an ASN number, "
+                      "HU and quantity column are required."),
         }
 
     header_vals = raw.iloc[hrow].tolist()
@@ -206,19 +209,19 @@ def parse_asn(file_bytes: bytes, sheet_name) -> tuple[pd.DataFrame, dict]:
             df[c] = ""
     df = df[list(ASN_ALIASES)]
 
-    # string clean
+    # tidy strings
     for c in df.columns:
         df[c] = df[c].map(clean)
 
-    # numeric columns tidy
+    # tidy numeric columns
     for c in ("QTY", "S_QTY", "GROSS_WEIGHT", "NET_WEIGHT"):
         df[c] = df[c].map(lambda v: fmt_num(v) if clean(v) != "" else "")
 
-    # සම්පූර්ණයෙන් හිස් rows අයින්
+    # drop completely blank rows
     df = df[(df["HU_ID"].str.strip() != "") | (df["ASN_NO"].str.strip() != "")]
     df = df.reset_index(drop=True)
 
-    # ASN line number නැත්නම් auto
+    # generate line numbers when the document has none
     if (df["ASN_LINE"].str.strip() == "").all():
         df["ASN_LINE"] = [str(i + 1) for i in range(len(df))]
 
@@ -243,12 +246,13 @@ def parse_asn(file_bytes: bytes, sheet_name) -> tuple[pd.DataFrame, dict]:
 def parse_inventory(file_bytes: bytes, sheet_name) -> tuple[pd.DataFrame, dict]:
     raw = _read_raw(file_bytes, sheet_name)
     if raw.empty:
-        return pd.DataFrame(columns=list(INV_ALIASES)), {"error": "Sheet එක හිස්."}
+        return pd.DataFrame(columns=list(INV_ALIASES)), {"error": "The sheet is empty."}
 
     hrow, cmap = _detect_header(raw, INV_LOOKUP, INV_MUST)
     if hrow < 0 or not cmap:
         return pd.DataFrame(columns=list(INV_ALIASES)), {
-            "error": "Inventory columns හඳුනාගන්න බැරි උනා. (Pallet / Actual Qty ඕනේ)"
+            "error": ("Could not identify the inventory columns - a pallet "
+                      "and actual quantity column are required.")
         }
 
     header_vals = raw.iloc[hrow].tolist()
@@ -279,7 +283,7 @@ def parse_inventory(file_bytes: bytes, sheet_name) -> tuple[pd.DataFrame, dict]:
 
 
 # ═══════════════════════════════════════════════════════════════════
-#  Embedded images  (xlsx = zip; xl/media/* ඇතුළේ images)
+#  Embedded images - an xlsx is a zip, images live under xl/media/
 # ═══════════════════════════════════════════════════════════════════
 _IMG_EXT = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
             ".gif": "image/gif", ".bmp": "image/bmp", ".webp": "image/webp",
@@ -289,9 +293,8 @@ _IMG_EXT = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
 
 def extract_images(file_bytes: bytes) -> list[dict]:
     """
-    Excel (.xlsx/.xlsm) එකක් ඇතුළේ embed වෙච්ච හැම image එකක්ම ගන්නවා.
-    Normal 'Insert > Picture' සහ 'Insert image in cell' දෙකම support.
-    return: [{name, data(bytes), mime, size_kb}]
+    Every image embedded in an .xlsx/.xlsm file. Handles both
+    'Insert > Picture' and 'Insert image in cell'.
     """
     out = []
     try:
@@ -313,14 +316,14 @@ def extract_images(file_bytes: bytes) -> list[dict]:
                     "size_kb": round(len(data) / 1024, 1),
                 })
     except zipfile.BadZipFile:
-        pass                                   # .xls වගේ පරණ format
+        pass                                   # older formats such as .xls
     except Exception:
         pass
     return out
 
 
 # ═══════════════════════════════════════════════════════════════════
-#  PDF  —  ASN documents PDF විදිහට එනවා නම්
+#  PDF - for ASN documents that arrive as PDF
 # ═══════════════════════════════════════════════════════════════════
 def pdf_available() -> bool:
     try:
@@ -335,7 +338,7 @@ def is_pdf(name: str, data: bytes = b"") -> bool:
 
 
 def _table_to_raw(table: list[list]) -> pd.DataFrame:
-    """pdfplumber table (list of rows) -> header නැති DataFrame."""
+    """pdfplumber table (list of rows) -> DataFrame without a header."""
     width = max((len(r) for r in table), default=0)
     rows = [list(r) + [""] * (width - len(r)) for r in table]
     return pd.DataFrame(rows, dtype=object)
@@ -343,10 +346,8 @@ def _table_to_raw(table: list[list]) -> pd.DataFrame:
 
 def list_pdf_tables(file_bytes: bytes) -> list[dict]:
     """
-    PDF එකේ තියෙන හැම table එකක්ම හොයලා, ASN data වගේ තියෙන ඒවා ඉස්සරහට
-    දාලා list කරනවා — user ට "මොන table එකද?" කියලා තෝරන්න.
-
-    return: [{key, label, page, index, rows, cols, score, preview(df), raw(df)}]
+    Find every table in the PDF and rank the ones that look like ASN data
+    first, so the user can pick the right one.
     """
     if not pdf_available():
         return []
@@ -388,22 +389,22 @@ def list_pdf_tables(file_bytes: bytes) -> list[dict]:
 def parse_asn_pdf(file_bytes: bytes, table_keys: list[str] | None = None
                   ) -> tuple[pd.DataFrame, dict]:
     """
-    PDF එකේ තෝරපු table(s) වලින් ASN canonical DataFrame එකක්.
-    table_keys නැත්නම් හොඳම එක automatic ව තෝරගන්නවා.
+    Build a canonical ASN DataFrame from the selected PDF table(s).
+    With no table_keys the best scoring table is used.
     """
     if not pdf_available():
         return pd.DataFrame(columns=list(ASN_ALIASES)), {
             "header_row": None, "mapped": {}, "unmapped": [], "sheet": "PDF",
-            "error": "pdfplumber install වෙලා නෑ. `pip install pdfplumber` කරන්න.",
+            "error": "pdfplumber is not installed. Run `pip install pdfplumber`.",
         }
 
     tables = list_pdf_tables(file_bytes)
     if not tables:
         return pd.DataFrame(columns=list(ASN_ALIASES)), {
             "header_row": None, "mapped": {}, "unmapped": [], "sheet": "PDF",
-            "error": ("PDF එකේ table එකක් හම්බුණේ නෑ. Scan කරපු PDF එකක් නම් "
-                      "text layer එකක් නෑ — Excel එකක් දාන්න, නැත්නම් මේ PDF එක "
-                      "ASN එකට document එකක් විදිහට attach කරන්න."),
+            "error": ("No table was found in this PDF. A scanned PDF has no "
+                      "text layer - upload an Excel file instead, or attach "
+                      "this PDF to the ASN as a document."),
         }
 
     picked = [t for t in tables if t["key"] in (table_keys or [])] or [tables[0]]
@@ -427,7 +428,8 @@ def parse_asn_pdf(file_bytes: bytes, table_keys: list[str] | None = None
     if not frames:
         return pd.DataFrame(columns=list(ASN_ALIASES)), {
             "header_row": None, "mapped": {}, "unmapped": [], "sheet": "PDF",
-            "error": "තෝරපු table එකේ ASN columns (ASN no / HU / Qty) හඳුනාගන්න බැරි උනා.",
+            "error": ("Could not identify ASN columns (ASN no / HU / quantity) "
+                      "in the selected table."),
         }
 
     df = pd.concat(frames, ignore_index=True)
@@ -443,7 +445,7 @@ def parse_asn_pdf(file_bytes: bytes, table_keys: list[str] | None = None
     df = df[(df["HU_ID"].str.strip() != "") | (df["ASN_NO"].str.strip() != "")]
     df = df.reset_index(drop=True)
 
-    # header row එකම නැවත repeat වෙලා තියෙනවා නම් (multi-page tables) අයින්
+    # drop repeated header rows that appear in multi-page tables
     df = df[df["HU_ID"].str.upper().str.strip() != "HU_ID"].reset_index(drop=True)
 
     if (df["ASN_LINE"].str.strip() == "").all():
@@ -462,7 +464,7 @@ def parse_asn_pdf(file_bytes: bytes, table_keys: list[str] | None = None
 
 
 def extract_pdf_images(file_bytes: bytes, max_images: int = 20) -> list[dict]:
-    """PDF එකේ embed වෙච්ච images (pypdf). නැත්නම් හිස් list එකක්."""
+    """Images embedded in the PDF, or an empty list."""
     out = []
     try:
         from pypdf import PdfReader
@@ -470,7 +472,7 @@ def extract_pdf_images(file_bytes: bytes, max_images: int = 20) -> list[dict]:
         for pi, page in enumerate(reader.pages, start=1):
             for im in getattr(page, "images", []):
                 data = im.data
-                if not data or len(data) < 4096:      # icons/logos skip
+                if not data or len(data) < 4096:      # skip icons and logos
                     continue
                 nm = getattr(im, "name", f"p{pi}_img")
                 ext = "." + nm.rsplit(".", 1)[-1].lower() if "." in nm else ".png"
