@@ -21,6 +21,7 @@ import streamlit as st
 
 import drive
 import gsheets
+import images
 import matching
 import parsing
 import reporting
@@ -77,6 +78,7 @@ SS.setdefault("parsed_asn", {})       # filename -> {df, meta, images}
 SS.setdefault("inv_df", None)         # canonical inventory (session)
 SS.setdefault("inv_note", "")
 SS.setdefault("recon", None)          # last recon result
+SS.setdefault("backup", None)
 
 
 def cfg_recon() -> dict:
@@ -129,8 +131,8 @@ if SS["role"] == "admin":
     st.sidebar.success("🛡️ Admin mode")
 
 PAGES = ["📊 Dashboard", "📤 ASN Upload", "📦 Inventory", "🔄 Reconciliation",
-         "🧾 ASN Register", "⚠️ Discrepancy", "✉️ Email", "✅ AX GRN",
-         "🖼️ ASN Images", "⚙️ Setup", "🗂️ Data Manager"]
+         "🧾 ASN Register", "🔍 Search", "⚠️ Discrepancy", "✉️ Email", "✅ AX GRN",
+         "🖼️ ASN Images", "⚙️ Setup", "🗂️ Data Manager", "🧹 Maintenance"]
 page = st.sidebar.radio("Menu", PAGES, label_visibility="collapsed")
 
 st.sidebar.markdown("---")
@@ -195,8 +197,22 @@ if page == "⚙️ Setup":
         a, b = st.columns(2)
         s["EMAIL_TO"] = a.text_input("Email To", s.get("EMAIL_TO", ""))
         s["EMAIL_CC"] = b.text_input("Email Cc", s.get("EMAIL_CC", ""))
+
+        st.markdown("**🖼️ Image storage**")
+        a, b, c = st.columns(3)
+        s["IMAGE_STORAGE"] = a.selectbox(
+            "Save කරන තැන", ["SHEET", "DRIVE"],
+            index=0 if str(s.get("IMAGE_STORAGE", "SHEET")).upper() != "DRIVE" else 1,
+            help="SHEET = Google Sheet එකේම (safe, quota ප්‍රශ්න නෑ). "
+                 "DRIVE = Drive folder එකට (folder එක share කරලා තියෙන්න ඕනේ).")
+        s["IMAGE_MAX_PX"] = str(int(b.number_input(
+            "Max px", value=gsheets.setting_float(s, "IMAGE_MAX_PX", 1400),
+            min_value=400.0, max_value=4000.0, step=100.0)))
+        s["IMAGE_QUALITY"] = str(int(c.number_input(
+            "JPEG quality", value=gsheets.setting_float(s, "IMAGE_QUALITY", 78),
+            min_value=40.0, max_value=95.0, step=1.0)))
         s["DRIVE_FOLDER_ID"] = st.text_input(
-            "Drive folder ID (ASN images)", s.get("DRIVE_FOLDER_ID", ""),
+            "Drive folder ID (DRIVE mode එකට විතරයි)", s.get("DRIVE_FOLDER_ID", ""),
             help="Drive folder එකක් හදලා service account එකට Editor විදිහට share කරලා ID එක දාන්න.")
         s["ADMIN_PIN"] = st.text_input("Admin PIN", s.get("ADMIN_PIN", "1234"))
 
@@ -205,7 +221,14 @@ if page == "⚙️ Setup":
             st.success("Save කළා ✅")
 
     st.markdown("---")
-    st.caption(f"Drive API: {'✅ ready' if drive.available() else '⚠️ google-api-python-client නෑ'}")
+    _mode = str(gsheets.settings_dict().get("IMAGE_STORAGE", "SHEET")).upper()
+    if _mode == "DRIVE":
+        st.caption(f"🖼️ Image storage: **DRIVE** · Drive API: "
+                   f"{'✅ ready' if drive.available() else '⚠️ google-api-python-client නෑ'} "
+                   f"· fail වුණොත් automatic ව Sheet එකට save වෙනවා.")
+    else:
+        st.caption("🖼️ Image storage: **SHEET** — images compress කරලා `IMAGE_DATA` "
+                   "sheet එකේම save වෙනවා. Drive quota ප්‍රශ්න නෑ.")
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -373,27 +396,24 @@ elif page == "📤 ASN Upload":
 
                 # images
                 if img_rows:
-                    folder = gsheets.settings_dict().get("DRIVE_FOLDER_ID", "")
-                    rows, fails = [], 0
-                    for asn, nm, src, mime, kb, data in img_rows:
-                        ok, res = drive.upload_image(data, f"{nkey(asn)}_{nm}", mime, folder)
+                    ok_n, errs = 0, []
+                    prog = st.progress(0.0, text="Images save වෙනවා...")
+                    for i, (asn, nm, src, mime, kb, data) in enumerate(img_rows):
+                        ok, msg = images.save_image(asn, nm, data, mime,
+                                                    source=src, user=user)
                         if ok:
-                            rows.append({
-                                "IMAGE ID": uuid.uuid4().hex[:10].upper(),
-                                "ASN NO": asn, "FILE NAME": nm, "SOURCE": src,
-                                "MIME": mime, "SIZE KB": kb,
-                                "DRIVE FILE ID": res["id"], "LINK": res["link"],
-                                "UPLOADED AT": ts, "UPLOADED BY": user, "NOTE": "",
-                            })
+                            ok_n += 1
+                            if msg and "fail" in msg.lower():
+                                errs.append(msg)
                         else:
-                            fails += 1
-                            SS["img_err"] = res
-                    if rows:
-                        gsheets.upsert("ASN_IMAGES", rows)
-                        st.success(f"🖼️ Images {len(rows)}ක් Drive එකට upload කළා")
-                    if fails:
-                        st.warning(f"Images {fails}ක් upload කරන්න බැරි උනා. "
-                                   f"{SS.get('img_err', '')}")
+                            errs.append(msg)
+                        prog.progress((i + 1) / len(img_rows),
+                                      text=f"Images {i + 1}/{len(img_rows)}")
+                    prog.empty()
+                    if ok_n:
+                        st.success(f"🖼️ Images {ok_n}ක් save කළා")
+                    for e_ in errs[:6]:
+                        st.warning(e_)
 
             SS["parsed_asn"] = {}
             st.balloons()
@@ -676,6 +696,116 @@ elif page == "🧾 ASN Register":
         file_name=f"ASN_Register_{date.today():%Y%m%d}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
+    if not pick.startswith("—"):
+        with st.expander(f"🗑️ `{pick}` delete කරන්න"):
+            if SS["role"] != "admin":
+                st.caption("Admin විතරයි — Sidebar → 🔑 Admin. "
+                           "(සම්පූර්ණ options 🧹 Maintenance page එකේ.)")
+            else:
+                st.caption("Summary, Details, Discrepancy, AX GRN සහ Images ඔක්කොම අයින් වෙනවා.")
+                t = st.text_input("තහවුරු කරන්න `DELETE` කියලා type කරන්න", key="reg_del")
+                if st.button("🗑️ Delete", disabled=t.strip().upper() != "DELETE"):
+                    res = {}
+                    for k in ("ASN_SUMMARY", "ASN_DETAIL", "DISCREPANCY", "AX_GRN"):
+                        res[k] = gsheets.delete_where(k, "ASN NO", [pick])
+                    res["ASN_IMAGES"] = images.delete_for_asn([pick])
+                    st.success("Delete කළා ✅ — " +
+                               " · ".join(f"{k}: {n}" for k, n in res.items()))
+                    st.rerun()
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  🔍 SEARCH
+# ═══════════════════════════════════════════════════════════════════
+elif page == "🔍 Search":
+    hero("🔍 Search", "ඕනෑම data එකක් — HU, ASN, item, lot, PO, GRN, vendor — හොයන්න")
+
+    SEARCHABLE = ["ASN_DETAIL", "ASN_SUMMARY", "INVENTORY", "DISCREPANCY",
+                  "AX_GRN", "ASN_IMAGES", "RECON_LOG", "EMAIL_LOG"]
+
+    c1, c2 = st.columns([3, 2])
+    term = c1.text_input("🔎 Search", placeholder="උදා: ETHT0726 · 26AUG_UPPD_40659 · GRN-40196",
+                         key="q_term")
+    where = c2.multiselect("Sheets", SEARCHABLE,
+                           default=["ASN_DETAIL", "ASN_SUMMARY", "INVENTORY"])
+
+    c1, c2, c3 = st.columns(3)
+    exact = c1.checkbox("Exact match", value=False)
+    case = c2.checkbox("Case sensitive", value=False)
+    limit = int(c3.number_input("Sheet එකකට උපරිම results", value=300.0,
+                                min_value=20.0, max_value=3000.0, step=50.0))
+
+    with st.expander("➕ Advanced — column එකකින් filter"):
+        adv_sheet = st.selectbox("Sheet", ["—"] + SEARCHABLE, key="adv_sh")
+        adv_col, adv_val = "—", ""
+        if adv_sheet != "—":
+            adv_col = st.selectbox("Column", ["—"] + schema.SHEETS[adv_sheet]["headers"],
+                                   key="adv_col")
+            adv_val = st.text_input("Value", key="adv_val")
+
+    if not term.strip() and adv_sheet == "—":
+        st.info("සෙවීමට වචනයක් type කරන්න. HU ID, ASN number, item, lot, GRN number, "
+                "vendor — ඕනෑම එකක් වැඩ කරනවා.")
+    else:
+        q = term.strip()
+        total, tabs_data = 0, []
+
+        targets = where if q else []
+        if adv_sheet != "—" and adv_sheet not in targets:
+            targets = targets + [adv_sheet]
+
+        for key in targets:
+            df = gsheets.get_df(key)
+            if df.empty:
+                continue
+            v = df
+            if q:
+                s = v.astype(str)
+                if exact:
+                    m = s.apply(lambda col: col.str.strip().str.lower() == q.lower()
+                                if not case else col.str.strip() == q)
+                else:
+                    m = s.apply(lambda col: col.str.contains(q, case=case,
+                                                             regex=False, na=False))
+                v = v[m.any(axis=1)]
+            if adv_sheet == key and adv_col != "—" and adv_val.strip():
+                v = v[v[adv_col].astype(str).str.contains(adv_val.strip(), case=case,
+                                                          regex=False, na=False)]
+            if not v.empty:
+                total += len(v)
+                tabs_data.append((key, v.head(limit)))
+
+        if not tabs_data:
+            st.warning(f"`{q or adv_val}` — කිසිම තැනක හම්බුණේ නෑ.")
+        else:
+            st.success(f"Results {total}ක් · sheets {len(tabs_data)}ක")
+            tabs = st.tabs([f"{k} ({len(v)})" for k, v in tabs_data])
+            for t, (k, v) in zip(tabs, tabs_data):
+                with t:
+                    # හම්බුණේ මොන columns වලද කියලා
+                    if q:
+                        hit_cols = [c for c in v.columns
+                                    if v[c].astype(str).str.contains(
+                                        q, case=case, regex=False, na=False).any()]
+                        if hit_cols:
+                            st.caption("Match වුණ columns: " +
+                                       ", ".join(f"`{c}`" for c in hit_cols[:10]))
+                    show(v, height=460)
+
+            st.download_button(
+                "📥 Search results Excel",
+                reporting.build_excel({k[:31]: v for k, v in tabs_data}),
+                file_name=f"Search_{date.today():%Y%m%d}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+            # ASN එකක් හම්බුණා නම් shortcut
+            asn_hits = set()
+            for k, v in tabs_data:
+                if "ASN NO" in v.columns:
+                    asn_hits |= {clean(a) for a in v["ASN NO"] if clean(a)}
+            if asn_hits:
+                st.caption("හම්බුණු ASN: " + ", ".join(f"`{a}`" for a in sorted(asn_hits)[:12]))
+
 
 # ═══════════════════════════════════════════════════════════════════
 #  ⚠️ DISCREPANCY
@@ -895,51 +1025,79 @@ elif page == "✅ AX GRN":
 elif page == "🖼️ ASN Images":
     hero("🖼️ ASN Images", "ASN එකට අදාළ photos / Excel එකේ embed වුණ images")
 
-    imgs = gsheets.get_df("ASN_IMAGES")
+    meta = gsheets.get_df("ASN_IMAGES")
     summ = gsheets.get_df("ASN_SUMMARY")
     asn_opts = sorted({a for a in summ["ASN NO"] if a}) if not summ.empty else []
+    if not asn_opts and not meta.empty:
+        asn_opts = sorted({a for a in meta["ASN NO"] if a})
 
-    with st.expander("➕ අලුත් image එකක් එකතු කරන්න", expanded=imgs.empty):
+    mode = str(gsheets.settings_dict().get("IMAGE_STORAGE", "SHEET")).upper()
+    st.caption(f"Storage mode: **{mode}** — Setup page එකෙන් වෙනස් කරන්න පුළුවන්.")
+
+    with st.expander("➕ අලුත් image එකක් එකතු කරන්න", expanded=meta.empty):
         c1, c2 = st.columns([1, 2])
         asn = c1.selectbox("ASN", asn_opts or ["—"])
         note = c2.text_input("Note", "")
-        ups = st.file_uploader("Images", type=["png", "jpg", "jpeg", "webp"],
+        ups = st.file_uploader("Images", type=["png", "jpg", "jpeg", "webp", "bmp"],
                                accept_multiple_files=True, key="img_only")
-        if st.button("⬆️ Upload", disabled=not ups or asn == "—"):
-            folder = gsheets.settings_dict().get("DRIVE_FOLDER_ID", "")
-            rows, fail = [], []
+        if st.button("⬆️ Upload", disabled=not ups or asn == "—", type="primary"):
+            ok_n, errs = 0, []
             for uf in ups:
-                d = uf.getvalue()
-                ok, res = drive.upload_image(d, f"{nkey(asn)}_{uf.name}",
-                                             uf.type or "image/png", folder)
+                ok, msg = images.save_image(asn, uf.name, uf.getvalue(),
+                                            uf.type or "image/png",
+                                            source="MANUAL UPLOAD",
+                                            user=SS["user"] or "unknown", note=note)
                 if ok:
-                    rows.append({
-                        "IMAGE ID": uuid.uuid4().hex[:10].upper(), "ASN NO": asn,
-                        "FILE NAME": uf.name, "SOURCE": "MANUAL UPLOAD",
-                        "MIME": uf.type or "", "SIZE KB": round(len(d) / 1024, 1),
-                        "DRIVE FILE ID": res["id"], "LINK": res["link"],
-                        "UPLOADED AT": now_str(), "UPLOADED BY": SS["user"] or "unknown",
-                        "NOTE": note,
-                    })
+                    ok_n += 1
+                    if msg and "fail" in msg.lower():
+                        errs.append(msg)
                 else:
-                    fail.append(res)
-            if rows:
-                gsheets.upsert("ASN_IMAGES", rows)
-                st.success(f"{len(rows)} upload කළා ✅")
-            for f_ in fail:
-                st.error(f_)
-            if rows:
+                    errs.append(msg)
+            if ok_n:
+                st.success(f"{ok_n} save කළා ✅")
+            for e_ in errs:
+                st.warning(e_)
+            if ok_n:
                 st.rerun()
 
-    if imgs.empty:
+    if meta.empty:
         st.info("Images නෑ.")
     else:
-        f = st.selectbox("ASN filter", ["— සියල්ල —"] + sorted({a for a in imgs["ASN NO"] if a}))
-        v = imgs if f.startswith("—") else imgs[imgs["ASN NO"] == f]
-        show(v[["ASN NO", "FILE NAME", "SOURCE", "SIZE KB", "LINK", "UPLOADED AT",
-                "UPLOADED BY", "NOTE"]])
-        for _, r in v.head(24).iterrows():
-            st.markdown(f"- **{r['ASN NO']}** · {r['FILE NAME']} → [open]({r['LINK']})")
+        f = st.selectbox("ASN filter", ["— සියල්ල —"] +
+                         sorted({a for a in meta["ASN NO"] if a}))
+        v = meta if f.startswith("—") else meta[meta["ASN NO"] == f]
+
+        a, b, c = st.columns(3)
+        kpi(a, len(v), "Images")
+        kpi(b, v["ASN NO"].nunique(), "ASN")
+        kpi(c, f'{fmt_num(v["SIZE KB"].map(to_num).sum())} KB', "Total size")
+
+        show(v[["IMAGE ID", "ASN NO", "FILE NAME", "SOURCE", "SIZE KB", "STORAGE",
+                "UPLOADED AT", "UPLOADED BY", "NOTE"]])
+
+        st.markdown("#### 👁️ Preview")
+        cols = st.columns(4)
+        for i, (_, r) in enumerate(v.head(16).iterrows()):
+            with cols[i % 4]:
+                if str(r.get("STORAGE", "SHEET")).upper() == "DRIVE" and r.get("LINK"):
+                    st.markdown(f"[🔗 {r['FILE NAME']}]({r['LINK']})")
+                else:
+                    data = images.load_image(r["IMAGE ID"])
+                    if data:
+                        st.image(data, caption=f"{r['ASN NO']} · {r['FILE NAME']}",
+                                 width="stretch")
+                        st.download_button("📥", data, file_name=r["FILE NAME"],
+                                           mime=r.get("MIME") or "image/jpeg",
+                                           key=f"dl_{r['IMAGE ID']}")
+                    else:
+                        st.caption(f"⚠️ {r['FILE NAME']} — data නෑ")
+
+        with st.expander("🗑️ Image delete"):
+            ids = st.multiselect("IMAGE ID", list(v["IMAGE ID"]))
+            if st.button("Delete", disabled=not ids):
+                n = images.delete_images(ids)
+                st.success(f"{n} delete කළා ✅")
+                st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1062,6 +1220,182 @@ elif page == "🗂️ Data Manager":
                        reporting.build_excel({key[:31]: df}),
                        file_name=f"{key}_{date.today():%Y%m%d}.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  🧹 MAINTENANCE  — ASN delete · database reset
+# ═══════════════════════════════════════════════════════════════════
+elif page == "🧹 Maintenance":
+    hero("🧹 Maintenance", "ASN delete · පරණ data clean · database reset")
+
+    if SS["role"] != "admin":
+        st.warning("Admin විතරයි. Sidebar → 🔑 Admin → PIN දාන්න.")
+        st.stop()
+
+    ASN_SHEETS = {
+        "ASN_SUMMARY": "ASN NO",
+        "ASN_DETAIL": "ASN NO",
+        "DISCREPANCY": "ASN NO",
+        "AX_GRN": "ASN NO",
+    }
+
+    t1, t2, t3 = st.tabs(["🗑️ ASN Delete", "🧽 Sheet Clear", "💥 Database Reset"])
+
+    # ───────────── ASN delete ─────────────
+    with t1:
+        st.markdown("#### ASN එකක් සම්පූර්ණයෙන් delete කරන්න")
+        st.caption("තෝරපු ASN එකට අදාළ Summary, Details, Discrepancy, AX GRN සහ "
+                   "Images ඔක්කොම අයින් වෙනවා. මේක **ආපහු හදාගන්න බෑ**.")
+
+        summ = gsheets.get_df("ASN_SUMMARY")
+        det = gsheets.get_df("ASN_DETAIL")
+        opts = sorted({clean(a) for a in summ["ASN NO"] if clean(a)}) if not summ.empty else []
+        if not opts and not det.empty:
+            opts = sorted({clean(a) for a in det["ASN NO"] if clean(a)})
+
+        if not opts:
+            st.info("ASN records නෑ.")
+        else:
+            sel = st.multiselect("Delete කරන්න ඕන ASN", opts, key="del_asn")
+
+            if sel:
+                # මොනවද යන්නේ කියලා පෙන්නනවා
+                st.markdown("##### මේවා අයින් වෙනවා")
+                counts = {}
+                for k, col in ASN_SHEETS.items():
+                    d = gsheets.get_df(k)
+                    counts[k] = 0 if d.empty or col not in d.columns else int(
+                        d[col].astype(str).str.strip().isin(sel).sum())
+                imeta = gsheets.get_df("ASN_IMAGES")
+                counts["ASN_IMAGES"] = 0 if imeta.empty else int(
+                    imeta["ASN NO"].astype(str).str.strip().isin(sel).sum())
+                show(pd.DataFrame([{"Sheet": k, "Rows": v} for k, v in counts.items()]))
+
+                prev = det[det["ASN NO"].astype(str).isin(sel)] if not det.empty else pd.DataFrame()
+                with st.expander(f"👁️ Delete වෙන lines ({len(prev)})"):
+                    show(prev[["ASN NO", "ASN LINE", "HU ID", "ITEM NUMBER", "QTY",
+                               "MATCH STATUS", "KORBER GRN", "AX GRN"]]
+                         if not prev.empty else prev)
+
+                st.download_button(
+                    "📥 Delete කරන්න කලින් backup එකක් ගන්න",
+                    reporting.build_excel({
+                        "Summary": summ[summ["ASN NO"].astype(str).isin(sel)],
+                        "Details": prev}),
+                    file_name=f"ASN_backup_{date.today():%Y%m%d}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+                st.markdown("##### තහවුරු කිරීම")
+                typed = st.text_input("තහවුරු කරන්න `DELETE` කියලා type කරන්න",
+                                      key="del_confirm")
+                also_img = st.checkbox("Images ත් අයින් කරන්න", value=True)
+
+                if st.button("🗑️ Delete", type="primary",
+                             disabled=typed.strip().upper() != "DELETE"):
+                    with st.spinner("Delete වෙනවා..."):
+                        res = {}
+                        for k, col in ASN_SHEETS.items():
+                            res[k] = gsheets.delete_where(k, col, sel)
+                        if also_img:
+                            res["ASN_IMAGES"] = images.delete_for_asn(sel)
+                    st.success("Delete කළා ✅ — " +
+                               " · ".join(f"{k}: {v}" for k, v in res.items()))
+                    st.rerun()
+
+    # ───────────── single sheet clear ─────────────
+    with t2:
+        st.markdown("#### Sheet එකක data ඔක්කොම clear කරන්න")
+        st.caption("Headers විතරක් ඉතුරු වෙනවා. Sheet එක delete වෙන්නේ නෑ.")
+
+        status = gsheets.sheet_status()
+        show(status)
+
+        k = st.selectbox("Sheet", list(schema.SHEETS), key="clr_sheet")
+        cur = gsheets.get_df(k)
+        st.caption(f"දැන් rows {len(cur)}ක් තියෙනවා.")
+
+        st.download_button(
+            f"📥 {k} backup",
+            reporting.build_excel({k[:31]: cur}),
+            file_name=f"{k}_backup_{date.today():%Y%m%d}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+        typed2 = st.text_input(f"තහවුරු කරන්න `{k}` කියලා type කරන්න", key="clr_confirm")
+        if st.button("🧽 Clear", disabled=typed2.strip() != k, type="primary"):
+            n = gsheets.clear_sheet(k)
+            st.success(f"{k} — rows {n}ක් clear කළා ✅")
+            st.rerun()
+
+    # ───────────── full reset ─────────────
+    with t3:
+        st.markdown("#### 💥 Database Reset")
+        st.error("මේකෙන් තෝරපු sheets වල **හැම record එකක්ම** අයින් වෙනවා. "
+                 "ආපහු හදාගන්න බෑ — කලින් backup එකක් ගන්න.")
+
+        DATA_SHEETS = ["ASN_SUMMARY", "ASN_DETAIL", "INVENTORY", "DISCREPANCY",
+                       "AX_GRN", "ASN_IMAGES", "IMAGE_DATA", "RECON_LOG", "EMAIL_LOG"]
+        MASTERS = ["USER-M", "SETTINGS"]
+
+        scope = st.radio(
+            "Reset scope",
+            ["🔸 Transaction data විතරක් (masters + settings ඉතුරු වෙනවා)",
+             "🔹 Custom — sheets තෝරන්න",
+             "🔴 සම්පූර්ණයෙන්ම (masters + settings ඇතුළුව)"],
+            key="reset_scope")
+
+        if scope.startswith("🔸"):
+            targets = DATA_SHEETS
+        elif scope.startswith("🔴"):
+            targets = DATA_SHEETS + MASTERS
+        else:
+            targets = st.multiselect("Sheets", list(schema.SHEETS),
+                                     default=DATA_SHEETS, key="reset_pick")
+
+        rows_now = {}
+        for k in targets:
+            try:
+                rows_now[k] = len(gsheets.get_df(k))
+            except Exception:
+                rows_now[k] = 0
+        st.markdown(f"**Sheets {len(targets)}ක · rows {sum(rows_now.values())}ක්** අයින් වෙනවා")
+        show(pd.DataFrame([{"Sheet": k, "Rows": v} for k, v in rows_now.items()]))
+
+        st.markdown("##### 📥 Reset කරන්න කලින් backup")
+        if st.button("Backup file එකක් හදන්න", key="mk_backup"):
+            SS["backup"] = reporting.build_excel(
+                {k[:31]: gsheets.get_df(k) for k in targets})
+        if SS.get("backup"):
+            st.download_button(
+                "📥 Full backup download",
+                SS["backup"],
+                file_name=f"FULL_BACKUP_{datetime.now():%Y%m%d_%H%M}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+        st.markdown("##### තහවුරු කිරීම")
+        c1, c2 = st.columns(2)
+        pin2 = c1.text_input("Admin PIN නැවත", type="password", key="reset_pin")
+        typed3 = c2.text_input("`RESET` කියලා type කරන්න", key="reset_confirm")
+        ack = st.checkbox("මම තේරුම් අරගෙන ඉන්නවා — මේ data ආපහු ගන්න බෑ.",
+                          key="reset_ack")
+
+        good_pin = pin2 == str(gsheets.settings_dict().get("ADMIN_PIN", "1234"))
+        ready = bool(targets) and good_pin and typed3.strip().upper() == "RESET" and ack
+
+        if pin2 and not good_pin:
+            st.warning("PIN වැරදියි.")
+
+        if st.button("💥 Database Reset", type="primary", disabled=not ready):
+            with st.spinner("Reset වෙනවා..."):
+                res = gsheets.reset_database(targets)
+                if "SETTINGS" in targets or "USER-M" in targets:
+                    gsheets.ensure_all()      # masters ආපහු seed වෙනවා
+            st.success("Reset කළා ✅ — " +
+                       " · ".join(f"{k}: {v}" for k, v in res.items()))
+            SS["recon"] = None
+            SS["parsed_asn"] = {}
+            SS["inv_df"] = None
+            SS["backup"] = None
+            st.rerun()
 
 
 # ───────────────────────────── footer ─────────────────────────────

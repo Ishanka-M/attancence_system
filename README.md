@@ -41,9 +41,11 @@ ASN document එකක් upload කරලා, Korber One inventory එකට ma
 | ⚠️ **Discrepancy** | විෂමතා **Summary සහ Details** report + Excel download + close කිරීම |
 | ✉️ **Email** | විස්තර සහිත **Markdown email** එකක් auto-generate (copy කරගන්න code block එකක්) |
 | ✅ **AX GRN** | AX GRN Pending list → **AX GRN Done** button → Fully Complete |
-| 🖼️ **ASN Images** | ASN එකට අදාළ photos Drive එකට + link register |
+| 🔍 **Search** | ඕනෑම data එකක් — HU, ASN, item, lot, PO, GRN, vendor — sheets කිහිපයක් හරහා |
+| 🖼️ **ASN Images** | ASN එකට අදාළ photos + preview + download + delete |
 | 📊 **Dashboard** | Pipeline funnel, status donut, discrepancy charts, ASN vs Received qty |
 | 🗂️ **Data Manager** | ඕනෑම sheet එකක් edit කරන්න (admin PIN) |
+| 🧹 **Maintenance** | **ASN delete** · sheet clear · **Database reset** (backup + confirm සමග) |
 
 ---
 
@@ -72,7 +74,7 @@ auto-strip වෙනවා (Setup → *Client prefix ඉවත් කරන්�
 ## 📑 Auto-create වෙන sheets
 
 `ASN_SUMMARY` · `ASN_DETAIL` · `INVENTORY` · `DISCREPANCY` · `AX_GRN` ·
-`ASN_IMAGES` · `RECON_LOG` · `EMAIL_LOG` · `USER-M` · `SETTINGS`
+`ASN_IMAGES` · `IMAGE_DATA` · `RECON_LOG` · `EMAIL_LOG` · `USER-M` · `SETTINGS`
 
 Setup page එකේ **🏗️ හැම Sheet එකක්ම හදන්න** ඔබන්න. පස්සේ schema එකට
 column එකක් එකතු කළත් ඒකත් auto-add වෙනවා (තියෙන data නැති නොවී).
@@ -107,12 +109,32 @@ streamlit run app.py
 
 ## 🖼️ Images ගැන
 
+Default විදිහට images **Google Sheet එකේම** save වෙනවා — Drive එක ඕන නෑ.
+
 * ASN Excel එක ඇතුළේ **embed වෙච්ච images** upload කරද්දීම auto-extract වෙනවා
   (`Insert → Picture` සහ `Insert image in cell` දෙකම).
-* ඒ ගොල්ලෝ Google Drive එකට upload වෙලා link එක `ASN_IMAGES` sheet එකේ save වෙනවා.
-* අමතර photos (GRN sheet, damage, seal) `🖼️ ASN Images` page එකෙන් දාන්න පුළුවන්.
-* Service account එකට තමන්ගේ storage quota නෑ — **folder එකක් share කරන එක**
-  අනිවාර්යයි.
+* Pillow එකෙන් resize (default max 1400px) + JPEG compress කරලා,
+  base64 chunks විදිහට `IMAGE_DATA` sheet එකට. Metadata `ASN_IMAGES` sheet එකේ.
+* 10 MB photo එකක් ~500 KB දක්වා පොඩි වෙනවා. `🖼️ ASN Images` page එකේ
+  preview, download, delete කරන්න පුළුවන්.
+
+**Drive එකට ඕන නම්:** Setup → Image storage → `DRIVE`, ඊට පස්සේ Drive folder
+එකක් හදලා service account එකට **Editor** විදිහට share කරලා folder ID එක දාන්න.
+Service account එකකට තමන්ගේ storage quota නෑ — folder එක share කරලා නැත්නම්
+Drive upload එක fail වෙනවා. ඒ වුණත් fail වුණාම automatic ව Sheet එකට
+fallback වෙනවා, ඒ නිසා image එක නැති වෙන්නේ නෑ.
+
+---
+
+## 🧹 Maintenance (admin)
+
+| Tab | වැඩේ |
+|---|---|
+| 🗑️ **ASN Delete** | ASN එකක් තෝරලා Summary + Details + Discrepancy + AX GRN + Images ඔක්කොම අයින්. කලින් backup Excel එකක් download කරගන්න පුළුවන්. තහවුරු කරන්න `DELETE` type කරන්න ඕනේ. |
+| 🧽 **Sheet Clear** | Sheet එකක data විතරක් clear (headers ඉතුරු). Sheet එකේ නම type කරලා තහවුරු. |
+| 💥 **Database Reset** | Transaction data විතරක් / custom sheets / සම්පූර්ණයෙන්ම. Full backup Excel + Admin PIN + `RESET` type කිරීම + checkbox — හතරම ඕනේ. |
+
+ASN එකක් වේගයෙන් delete කරන්න `🧾 ASN Register` page එකෙත් shortcut එකක් තියෙනවා.
 
 ---
 
@@ -126,4 +148,5 @@ streamlit run app.py
 | `parsing.py` | Excel parsing (alias mapping, header detect, image extract) |
 | `matching.py` | Reconciliation engine |
 | `reporting.py` | Excel reports + Markdown email |
-| `drive.py` | Drive image upload |
+| `images.py` | Image compress / Sheet storage / load / delete |
+| `drive.py` | Drive image upload (optional) |

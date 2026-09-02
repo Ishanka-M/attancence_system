@@ -273,6 +273,46 @@ def replace_rows(sheet_key: str, new_df: pd.DataFrame, key_values: list[str]):
     overwrite(sheet_key, out)
 
 
+# ───────────────────────── delete / reset ─────────────────────────
+def delete_where(sheet_key: str, column: str, values) -> int:
+    """
+    column එකේ අගය `values` ඇතුළේ තියෙන හැම row එකක්ම අයින් කරනවා.
+    return: අයින් වුණ row ගණන.
+    """
+    df = get_df(sheet_key)
+    if df.empty or column not in df.columns:
+        return 0
+    keys = {str(v).strip() for v in values if str(v).strip()}
+    if not keys:
+        return 0
+    mask = df[column].astype(str).str.strip().isin(keys)
+    n = int(mask.sum())
+    if n:
+        overwrite(sheet_key, df[~mask].reset_index(drop=True))
+    return n
+
+
+def clear_sheet(sheet_key: str) -> int:
+    """Sheet එකේ data ඔක්කොම අයින් — headers විතරක් තියෙනවා."""
+    df = get_df(sheet_key)
+    n = len(df)
+    overwrite(sheet_key, pd.DataFrame(columns=schema.SHEETS[sheet_key]["headers"]))
+    return n
+
+
+def reset_database(keys: list[str]) -> dict[str, int]:
+    """දුන්න sheets ඔක්කොම clear කරනවා. return: {sheet: deleted_rows}"""
+    out = {}
+    for k in keys:
+        if k in schema.SHEETS:
+            try:
+                out[k] = clear_sheet(k)
+            except Exception as e:                       # pragma: no cover
+                out[k] = -1
+                st.warning(f"{k}: {e}")
+    return out
+
+
 # ───────────────────────── settings ─────────────────────────
 def settings_dict() -> dict:
     df = get_df("SETTINGS")

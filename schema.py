@@ -107,9 +107,11 @@ AX_GRN_HEADERS = [
 ]
 
 ASN_IMAGES_HEADERS = [
-    "IMAGE ID", "ASN NO", "FILE NAME", "SOURCE", "MIME", "SIZE KB",
+    "IMAGE ID", "ASN NO", "FILE NAME", "SOURCE", "MIME", "SIZE KB", "STORAGE",
     "DRIVE FILE ID", "LINK", "UPLOADED AT", "UPLOADED BY", "NOTE",
 ]
+
+IMAGE_DATA_HEADERS = ["IMAGE ID", "SEQ", "CHUNK"]
 
 RECON_LOG_HEADERS = [
     "RUN ID", "RUN AT", "RUN BY", "ASN COUNT", "ASN LIST",
@@ -135,7 +137,10 @@ DEFAULT_SETTINGS = [
     ["CHECK_LOT", "Y", "Lot number compare කරන්නද? (Y/N)"],
     ["CHECK_ASN_NO", "Y", "Inventory ASN number compare කරන්නද? (Y/N)"],
     ["FLAG_EXTRA", "Y", "ASN එකේ නැති HU inventory එකේ තිබ්බොත් flag කරන්නද? (Y/N)"],
-    ["DRIVE_FOLDER_ID", "", "ASN images upload වෙන Google Drive folder ID එක"],
+    ["IMAGE_STORAGE", "SHEET", "Images කොහෙද save කරන්නේ? SHEET (default, safe) | DRIVE"],
+    ["IMAGE_MAX_PX", "1400", "Image එකේ උපරිම දිග/පළල (px) — ඊට වඩා ලොකු නම් resize"],
+    ["IMAGE_QUALITY", "78", "JPEG compress quality (40-95)"],
+    ["DRIVE_FOLDER_ID", "", "IMAGE_STORAGE=DRIVE නම් images යන Drive folder ID එක"],
     ["EMAIL_TO", "", "Discrepancy email එකේ default To"],
     ["EMAIL_CC", "", "Discrepancy email එකේ default CC"],
     ["COMPANY", "EFL", "Report/email වල පෙන්නන company නම"],
@@ -184,6 +189,12 @@ SHEETS: dict[str, dict] = {
         "kind": "data",
         "key": "IMAGE ID",
         "headers": ASN_IMAGES_HEADERS,
+    },
+    "IMAGE_DATA": {
+        "title": "IMAGE_DATA",
+        "kind": "data",
+        "key": None,
+        "headers": IMAGE_DATA_HEADERS,
     },
     "RECON_LOG": {
         "title": "RECON_LOG",
