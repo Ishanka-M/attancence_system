@@ -1,242 +1,129 @@
-# 📊 Central System Support Team — KPI System
+# 📦 ASN ↔ GRN Control System
 
-මුල් **`KPI_CSS_-_EGF_OTH__2_.xlsb`** Excel file එක වෙනුවට හදපු
-**Streamlit + Python + Google Sheets** system එක.
-GitHub එකට push කරලා **Streamlit Cloud** එකේ free deploy කරන්න පුළුවන්.
+ASN document එකක් upload කරලා, Korber One inventory එකට match කරලා,
+**Korber GRN → AX GRN → Fully Complete** කියන pipeline එක manage කරන
+**Streamlit + Google Sheets** system එක.
+
+පරණ `attancence_system` එකේ Google Sheets backend එකේ ව්‍යුහය තියාගෙන,
+ඇතුළත සම්පූර්ණයෙන්ම ASN/GRN වැඩේට අලුතෙන් ලියලා තියෙනවා.
 
 ---
 
-## ✨ විශේෂාංග
+## 🔄 Flow එක
 
-### 🔐 Login & Roles
-- **👤 User** — USER ID එකෙන් log වෙනවා. තමන්ගේ data විතරක්.
-- **👔 Leader** — USER-M එකේ **SUPERVISOR ID** = ඒ leader ගේ USER ID විදිහට users
-  assign කළාම, leader log වුණාම **තමන්ගේ team එකේ හැම user කෙනෙක්ගේම data**
-  (recursive, multi-level) පේනවා + ඔවුන් වෙනුවෙන් entry/upload කරන්න පුළුවන්.
-  *(Assign කරන්නේ Admin → Data Manager → USER-M → SUPERVISOR ID column එකෙන්.)*
-- **🛡️ Admin** — `admin_pin` එකෙන්. සම්පූර්ණ data + reports + audit + upload + CRUD.
+```
+📤 ASN Upload  ──►  📦 Inventory  ──►  🔄 Reconciliation
+                                          │
+                        ┌─────────────────┴──────────────────┐
+                        │                                    │
+                  tally වෙනවා                          tally නෑ
+                        │                                    │
+                 KORBER GRN DONE                     ⚠️ DISCREPANCY
+                        │                              │        │
+                 ✅ AX GRN PENDING                Summary+    ✉️ Markdown
+                        │                         Details      email
+                 [AX GRN Done] button              report
+                        │
+                 🎉 FULLY COMPLETE
+```
 
-### 📤 Bulk Upload — system එකෙන් calculate වෙනවා
-අවම columns දාලා upload කළාම ඉතුරු ඔක්කොම **auto-calculate** වෙනවා:
-- **TRANSACTION** (`Date, USER ID, SITE, CUSTOMMER, T-CODE, TIME, # OF TRANSACTION`)
-  → USER NAME, Description, UOM, SMV, UTILIZE HOURS, REVANUE, In compute.
-  T-CODE/TIME/qty invalid rows **block**.
-- **ATTANDANCE** (`UNIC CODE, DATE, USER ID, IN DATE & TIME, OUT DATE & TIME, WORCK LOCATION`)
-  → **# OF WORKING HRS = (OUT − IN) − LUNCH & TEA(1)**, # OF OT HRS = WORKING − SCHEDULED,
-  SCHEDULED HRS, UTILIZED HOURS (ඒ දවසේ transactions වලින්), UTILIZATION, USER NAME/DEPT compute.
-  පැය 20+ හෝ නිවාඩු/ඉරිදා rows → **PENDING** (admin approval).
+---
 
-| Page | User | Admin |
-|------|:----:|:-----:|
-| 🏠 Dashboard (monthly OT/Revenue/Cost/Incentive) | තමන්ගේ | සියල්ල |
-| 📝 Transaction · 🕐 Attendance | තමන්ට lock | සියල්ල |
-| 💰 Incentive | තමන්ගේ row | recalc + save |
-| ⚙️ Setup · ⏱️ OT · 📋 Complaint · ✅ KPI · 🔍 Audit | — | ✅ |
-| 📥 Export · 📤 Upload · 🛡️ Admin · 🗂️ Data Manager | — | ✅ |
-
-### 📤 Bulk Upload (admin)
-ATTANDANCE / TRANSACTION — Excel (.xlsx) හෝ CSV එකකින් data එකපාර add කරන්න.
-Template එකක් download කරගන්න පුළුවන්. **Upload කරද්දීත් audit rules check වෙනවා:**
-- **TRANSACTION:** T-CODE/TIME/qty valid ද check කරලා, error rows **block** කරනවා.
-  SMV/UTILIZE/REVANUE/In auto-recompute වෙනවා.
-- **ATTANDANCE:** පැය 20+ හෝ නිවාඩු/ඉරිදා rows → **PENDING** (admin approve කරන තෙක්),
-  සතියට OT 15+ → highlight. "Clean විතරක්" හෝ "ඔක්කොම (violations PENDING)" කියලා තෝරන්න පුළුවන්.
-
-### 🗂️ Data Manager (admin) — Add / Update / Delete
-`USER-M`, `CUSTOMMER-M`, `TCODE-M` (= Master sheet - Finalized),
-`CUSTOMMER COMPLAINT` ඇතුළු ඕනෑම sheet එකක records **add / update / delete**
-කරන්න පුළුවන් (table එකේ edit කරලා Save).
+## ✨ මොනවද කරන්නේ
 
 | Page | වැඩේ |
 |------|------|
-| ⚙️ **Setup** | Google Sheet එකේ **හැම tab එකක්ම auto-create** + masters seed |
-| 📝 **Transaction** | Activity එකක් දාද්දී SMV / Revenue / Incentive **auto-calculate** |
-| 🕐 **Attendance** | Working hrs, OT, Utilization auto |
-| ⏱️ **OT Approval** | OT request / approval tracking |
-| 📋 **Complaint** | Customer complaint log |
-| ✅ **KPI Update** | On-time KPI update tracking |
-| 💰 **Incentive** | User එක එකකට incentive එකතුව + complaint penalty + INSENTIVE sheet save |
-| 💵 **Cost/Revenue** | **User-wise payroll cost vs revenue** report (monthly) + Excel download *(admin)* |
-| 🔍 **Audit** | Rule violations 5ක් highlight කරලා පෙන්නනවා |
-| 📥 **Export** · 📤 **Upload** · 🛡️ **Admin** · 🗂️ **Data Manager** | admin |
-| 🏠 **Dashboard** | Monthly OT/Revenue/Cost/Incentive + **SITE volume** + **Top-5 performers** graphs |
-
-### 💵 Cost & Revenue (admin)
-Book1 format එකට — user එක එකකට මාසික **Cost to Company vs Revenue + Margin**:
-`Cost = Basic + OT-N/OT-D Amount + Fixed Incentive + EPF(12%) + ETF(3%) + Contractor Fee`,
-`Revenue = transactions`, `Margin = Revenue − Cost`. Margin අඩු (loss) users රතුවෙන් highlight.
-**OT-N / OT-D variance** (Revenue OT − OT Amount) columns දෙකකුත් තියෙනවා — OT වැඩ
-ලාභදායකද කියලා බලන්න. Salary data **🗂️ Data Manager → SALARY-M** එකෙන් දාන්න.
-
-### 🏠 Dashboard meters (හැම user කෙනෙක්ටම)
-- **SITE level transaction volume** (current month) — analog **gauge meters**
-- **Top 5 transaction performers** — 🥇🥈🥉 gauge meters
-- මාසය default current month එකට select වෙනවා.
-
-> මුල් Excel එකේ data ඔක්කොම (336 T-codes, 110 users, 128 customers, sites,
-> locations, times) seed data විදිහට මේකට දාලා තියෙනවා — Setup එක run කළාම
-> Google Sheet එක ම පිරිලා එනවා.
-
-### 🗂️ Google Sheet data format
-ATTANDANCE, TRANSACTION, OT APPROVAL, CUSTOMMER COMPLAINT — **මුල් Excel එකේ
-column නම් + order එකම** තියාගෙන save වෙනවා (TRANSACTION 19 cols, ATTANDANCE
-21 cols). Audit feature වලට ඕනේ system columns 3ක් විතරක් (`SCHEDULED HRS`,
-`APPROVAL STATUS`, `APPROVAL NOTE`) ATTANDANCE එකේ **අගට** add වෙනවා — මුල්
-format එක එලෙසම තියෙනවා. Export කරද්දී downloaded Excel එකත් මේ format එකෙන්මයි.
-
-### 📊 Monthly dashboard (user level)
-මාසය select කරලා, user එක එකකට **OT Hrs · Normal Rev · OT Rev · Total Revenue
-· Incentive · Cost** බලන්න පුළුවන්.
-> **Cost** = incentive payout කියලා assume කරලා තියෙනවා. වෙනත් cost basis එකක්
-> (OT wage වගේ) ඕනේ නම් `calc.monthly_user_summary` එකේ `COST` line එක වෙනස් කරන්න.
+| ⚙️ **Setup** | Google Sheet එකේ **හැම tab එකක්ම auto-create** + matching settings |
+| 📤 **ASN Upload** | Excel upload → **sheet එක තෝරලා confirm** → Summary + Details save → Excel එකේ තියෙන **images auto-extract** කරලා Drive එකට |
+| 📦 **Inventory** | Korber inventory report upload + snapshot save |
+| 🔄 **Reconciliation** | ASN vs Inventory match → tally ඒවාට **Korber GRN Done** remark → tally නැති ඒවා discrepancy |
+| 🧾 **ASN Register** | Summary + Details browse / filter / Excel download |
+| ⚠️ **Discrepancy** | විෂමතා **Summary සහ Details** report + Excel download + close කිරීම |
+| ✉️ **Email** | විස්තර සහිත **Markdown email** එකක් auto-generate (copy කරගන්න code block එකක්) |
+| ✅ **AX GRN** | AX GRN Pending list → **AX GRN Done** button → Fully Complete |
+| 🖼️ **ASN Images** | ASN එකට අදාළ photos Drive එකට + link register |
+| 📊 **Dashboard** | Pipeline funnel, status donut, discrepancy charts, ASN vs Received qty |
+| 🗂️ **Data Manager** | ඕනෑම sheet එකක් edit කරන්න (admin PIN) |
 
 ---
 
-## 🔍 Audit Rules (system එකෙන්ම audit වෙනවා)
+## 🧠 Matching logic
 
-| # | Rule | වැඩේ |
-|---|------|------|
-| 1 | **20hr cap** | `# OF WORKING HRS` පැය 20+ → **Admin approval**. |
-| 2 | **නිවාඩු/ඉරිදා** | ඉරිදා/නිවාඩු දවසට attendance → **Admin approval**. |
-| 3 | **OT ↔ Transaction** | OT කළ දවසට TRANSACTION එකේ **OT-N/OT-D එක line එකක්** තිබ්බොත් ඇති. |
-| 4 | **Complaint penalty** | Complaint එකක් → incentive අඩු (1000/complaint). |
-| 5 | **සතියට OT 15+** | සතියකට OT 15 ඉක්මෙව්වොත් highlight. |
-| 6 | **මාසෙට OT 60+** | මාසෙකට OT 60 ඉක්මෙව්වොත් Audit violation. |
-| 7 | **Missing Txn** | දවසකට TRANSACTION දාලා නැති users. |
+ප්‍රධාන key එක **HU ID** (ASN `HU_ID` ↔ Inventory `Pallet`).
 
-> **Leaders ටත් Audit** පේනවා — තමන්ගේ team එකේ users ට අදාළව scope වෙලා.
+| තත්ත්වය | Status | Korber GRN |
+|---|---|---|
+| HU inventory එකේ නෑ | `MISSING IN INVENTORY` | PENDING |
+| Qty වෙනස් | `QTY MISMATCH` | PENDING |
+| Item number වෙනස් | `ITEM MISMATCH` | PENDING |
+| Lot number වෙනස් | `LOT MISMATCH` | PENDING |
+| වෙන ASN එකකට receive වෙලා | `WRONG ASN` | PENDING |
+| ASN එකේ නැති HU inventory එකේ | `EXTRA IN INVENTORY` | PENDING |
+| ඔක්කොම හරි ✅ | `MATCHED` | **DONE** |
 
+ASN එකේ **හැම line එකක්ම** MATCHED නම් → ASN status = `KORBER GRN DONE`
+→ automatic ව `AX_GRN` sheet එකට `AX GRN PENDING` විදිහට යනවා.
 
-**වැඩ පැය schedule** (`schema.py` → `WORKDAY_HOURS`):
-සතියේ දවස් **08:00–17:00 = 8h** · සෙනසුරාදා **08:00–13:00 = 5h** · ඉරිදා **නිවාඩු**.
-
-**Admin login:** secrets එකේ `[app] admin_pin` දාලා, sidebar එකේ 🔑 Admin login එකෙන්
-PIN දාන්න. එතකොට Approvals + Holiday setup unlock වෙනවා.
-
----
-
-## 🧮 Calculation Logic (Excel formulas → Python)
-
-මුල් Excel එකේ formulas reverse-engineer කරලා verify කරපු:
-
-```
-UTILIZE HOURS  = # OF TRANSACTION × SMV(M) ÷ 60
-REVANUE-NORMAL = # OF TRANSACTION × NORMAL rate     (TIME = NORMAL නම්)
-REVANUE-OT-N   = # OF TRANSACTION × OT-N rate        (TIME = OT -N නම්)
-REVANUE-OT-D   = # OF TRANSACTION × OT-D rate        (TIME = OT -D නම්)
-TXN INCENTIVE  = TOTAL REVANUE ÷ 10
-UTILIZATION    = UTILIZED HOURS ÷ # OF WORKING HRS
-```
-
-> ✅ මේ formulas මුල් Excel එකේ row එකක් (CSSTR0201, NORMAL, qty 128 →
-> revenue 793.06) එක්ක exact ගැළපුණා.
-
-Incentive rules (`schema.py` එකේ වෙනස් කරන්න පුළුවන්):
-`0-Complaint = 3000`, `On-time KPI = 4000`, `100% OT recovery = 3000`, `Target = 20000`.
+`HIES-26AUG_UPPD_40659` වගේ inventory ASN numbers වල client prefix එක
+auto-strip වෙනවා (Setup → *Client prefix ඉවත් කරන්න*).
 
 ---
 
-## 🚀 Setup පියවරෙන් පියවර
+## 📑 Auto-create වෙන sheets
 
-### 1️⃣ Google Cloud — Service Account හදන්න
+`ASN_SUMMARY` · `ASN_DETAIL` · `INVENTORY` · `DISCREPANCY` · `AX_GRN` ·
+`ASN_IMAGES` · `RECON_LOG` · `EMAIL_LOG` · `USER-M` · `SETTINGS`
 
-1. <https://console.cloud.google.com> → අලුත් **Project** එකක්.
-2. **APIs & Services → Library** → මේ දෙක **Enable** කරන්න:
-   - *Google Sheets API*
-   - *Google Drive API*
-3. **APIs & Services → Credentials → Create Credentials → Service Account**.
-4. Service account හදලා → **Keys → Add Key → JSON** → key file එක download වෙනවා.
-5. ඒ JSON එකේ තියෙන `client_email` එක copy කරගන්න
-   (උදා: `kpi-bot@project.iam.gserviceaccount.com`).
+Setup page එකේ **🏗️ හැම Sheet එකක්ම හදන්න** ඔබන්න. පස්සේ schema එකට
+column එකක් එකතු කළත් ඒකත් auto-add වෙනවා (තියෙන data නැති නොවී).
 
-### 2️⃣ Secrets දාන්න
+---
 
-`.streamlit/secrets.toml.example` එක `.streamlit/secrets.toml` විදිහට copy කරලා,
-download කරපු JSON එකේ values දාන්න:
+## 🚀 Setup
 
-```toml
-[app]
-spreadsheet_id = ""                 # තියෙන Sheet එකක් නම් URL එකේ id එක දාන්න
-spreadsheet_name = "EFL KPI System" # නැත්නම් මේ නමින් auto-create වෙයි
-share_email = "ඔයාගේ@gmail.com"     # auto-create වුණොත් මේකට share වෙයි
+### 1. Google service account
+1. [console.cloud.google.com](https://console.cloud.google.com) → project එකක් හදන්න
+2. **Google Sheets API** සහ **Google Drive API** enable කරන්න
+3. IAM → Service Accounts → account එකක් හදලා **JSON key** එකක් download කරන්න
+4. Google Sheet එකක් හදලා ඒ JSON එකේ `client_email` එකට **Editor** විදිහට share කරන්න
 
-[gcp_service_account]
-# ... JSON file එකේ field ඔක්කොම ...
-```
+### 2. Secrets
+`.streamlit/secrets.toml.example` → `.streamlit/secrets.toml` කියලා rename කරලා
+values දාන්න. (Streamlit Cloud එකේදී App → Settings → Secrets.)
 
-> **වැදගත්:** දැනටමත් Google Sheet එකක් පාවිච්චි කරනවා නම්, ඒකේ **Share** එකෙන්
-> service account එකේ `client_email` එකට **Editor** permission දෙන්න. නැත්නම්
-> `spreadsheet_id` හිස් තියලා app එකට අලුත් එකක් හදන්න දෙන්න.
-
-### 3️⃣ Local run
-
+### 3. Run
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-App එක open වුණාම → **⚙️ Setup → 🚀 Sheets Auto-Create / Sync** click කරන්න.
-මේකෙන් Google Sheet එකේ tabs ඔක්කොම හැදිලා, masters seed වෙනවා.
+### 4. පළමු වතාවේ
+1. **⚙️ Setup** → 🏗️ හැම Sheet එකක්ම හදන්න
+2. Settings වල `CLIENT_CODE` (උදා: `HIES`), site, email addresses දාන්න
+3. Images ඕන නම් Drive folder එකක් හදලා service account එකට Editor විදිහට
+   share කරලා, folder ID එක `DRIVE_FOLDER_ID` එකට දාන්න
 
 ---
 
-## ☁️ GitHub + Streamlit Cloud Deploy
+## 🖼️ Images ගැන
 
-### GitHub එකට push
-
-```bash
-cd kpi_system
-git init
-git add .
-git commit -m "EFL KPI system - initial"
-git branch -M main
-git remote add origin https://github.com/<ඔයාගේ-user>/<repo>.git
-git push -u origin main
-```
-
-> `.streamlit/secrets.toml` එක `.gitignore` එකේ block කරලා තියෙන නිසා
-> push වෙන්නේ නෑ — හරි.
-
-### Streamlit Cloud
-
-1. <https://share.streamlit.io> → **New app** → GitHub repo එක select කරන්න.
-2. **Main file path** = `app.py`.
-3. **Advanced settings → Secrets** එකට, ඔයාගේ `secrets.toml` content එකම paste කරන්න.
-4. **Deploy** → done. 🎉
+* ASN Excel එක ඇතුළේ **embed වෙච්ච images** upload කරද්දීම auto-extract වෙනවා
+  (`Insert → Picture` සහ `Insert image in cell` දෙකම).
+* ඒ ගොල්ලෝ Google Drive එකට upload වෙලා link එක `ASN_IMAGES` sheet එකේ save වෙනවා.
+* අමතර photos (GRN sheet, damage, seal) `🖼️ ASN Images` page එකෙන් දාන්න පුළුවන්.
+* Service account එකට තමන්ගේ storage quota නෑ — **folder එකක් share කරන එක**
+  අනිවාර්යයි.
 
 ---
 
-## 📁 File structure
+## 🗂️ Files
 
-```
-kpi_system/
-├── app.py            # Streamlit UI (pages 9යි)
-├── gsheets.py        # Google Sheets connect + AUTO-CREATE + read/write
-├── schema.py         # හැම sheet එකකම headers + incentive rules
-├── calc.py           # SMV / Revenue / Utilization / Incentive engine
-├── seeds.json        # මුල් Excel masters (T-codes, users, sites...)
-├── requirements.txt
-├── .gitignore
-├── .streamlit/
-│   └── secrets.toml.example
-└── README.md
-```
-
----
-
-## 🔧 Customize කරන්න
-
-- **අලුත් column / sheet:** `schema.py` එකේ `SHEETS` dict එකට දාන්න — Setup එක
-  run කළාම auto-create වෙනවා.
-- **Incentive rules වෙනස්:** `schema.py` උඩ තියෙන constants වෙනස් කරන්න.
-- **T-code rates update:** 👥 Masters → `TCODE-M` → cell edit → Save.
-
----
-
-## ⚠️ සටහන්
-
-- OT revenue counted වෙන්නේ TIME එක හරියට select කළොත් විතරයි (NORMAL / OT -N / OT -D).
-- මුල් Excel එකේ dates *serial number* (උදා 46174) විදිහට තිබුණා — මේ system එක
-  සාමාන්‍ය `YYYY-MM-DD` dates පාවිච්චි කරනවා (clean).
-- `OT RECOVERY %` දැනට manual/0 — recovery data source එකක් තිබ්බොත් `calc.compute_incentive`
-  එකේ `ot_recovery` dict එකට pass කරන්න පුළුවන්.
+| File | වැඩේ |
+|------|------|
+| `app.py` | Streamlit UI — හැම page එකම |
+| `schema.py` | Sheet definitions + status constants |
+| `gsheets.py` | Google Sheets backend + auto-create |
+| `parsing.py` | Excel parsing (alias mapping, header detect, image extract) |
+| `matching.py` | Reconciliation engine |
+| `reporting.py` | Excel reports + Markdown email |
+| `drive.py` | Drive image upload |
