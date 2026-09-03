@@ -247,28 +247,29 @@ def inject_css():
 
   /* ── sidebar navigation ───────────────────────────────── */
   section[data-testid="stSidebar"] {{ background:{NAV_BG};
-      border-right:1px solid #1b2634; width:255px !important; }}
+      border-right:1px solid #1b2634; width:280px !important; max-width:280px; }}
   section[data-testid="stSidebar"] * {{ color:{NAV_TEXT}; }}
-  section[data-testid="stSidebar"] .block-container {{ padding-top:1.15rem; }}
+  section[data-testid="stSidebar"] .block-container {{ padding-top:1.15rem; padding-left:.8rem; padding-right:.8rem; }}
   /* the default 1rem gap turns a 13-item menu into a scrolling page */
   section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {{
-      gap:.1rem; }}
+      gap:.15rem; }}
   section[data-testid="stSidebar"] div[data-testid="stElementContainer"] {{
       margin:0; }}
 
   .navbrand {{ display:flex; align-items:center; gap:.6rem;
                padding:0 .2rem .9rem .2rem; margin-bottom:.7rem;
-               border-bottom:1px solid #1e2937; }}
+               border-bottom:1px solid #1e2937; word-wrap:break-word; }}
   .navbrand .mark {{ width:32px; height:32px; border-radius:9px; flex:none;
       background:linear-gradient(135deg,{ACCENT},{ACCENT_2}); color:#fff;
       font-size:.85rem; font-weight:700;
       display:flex; align-items:center; justify-content:center; }}
-  .navbrand .n {{ font-size:.9rem; font-weight:650; color:#fff; line-height:1.2; }}
-  .navbrand .s {{ font-size:.7rem; color:#7d8b9a; }}
+  .navbrand .n {{ font-size:.92rem; font-weight:660; color:#fff; line-height:1.25; word-wrap:break-word; }}
+  .navbrand .s {{ font-size:.72rem; color:#7d8b9a; }}
 
-  .navlabel {{ font-size:.66rem; font-weight:700; letter-spacing:.09em;
-               text-transform:uppercase; color:#63727f;
-               padding:1.05rem .6rem .45rem .6rem; margin:0; line-height:1.2; }}
+  .navlabel {{ font-size:.68rem; font-weight:720; letter-spacing:.08em;
+               text-transform:uppercase; color:#66757f;
+               padding:1.15rem .7rem .5rem .7rem; margin:0; line-height:1.3; 
+               word-wrap:break-word; }}
 
   /* nav rows are buttons so only one can ever look active */
   section[data-testid="stSidebar"] .stButton {{ margin:0; }}
@@ -277,22 +278,23 @@ def inject_css():
   section[data-testid="stSidebar"] .stButton>button {{
       background:transparent; border:1px solid transparent; color:{NAV_TEXT};
       width:100%; justify-content:flex-start; text-align:left;
-      padding:.42rem .6rem; font-size:.855rem; font-weight:520;
-      line-height:1.35; min-height:2.1rem; border-radius:8px;
-      box-shadow:inset 2px 0 0 transparent; }}
+      padding:.5rem .65rem; font-size:.88rem; font-weight:530;
+      line-height:1.4; min-height:2.3rem; border-radius:8px;
+      box-shadow:inset 2px 0 0 transparent; white-space:normal; word-wrap:break-word; }}
   section[data-testid="stSidebar"] .stButton>button p {{
-      color:inherit; font-size:.855rem; margin:0; text-align:left; }}
+      color:inherit; font-size:.88rem; margin:0; text-align:left; 
+      white-space:normal; word-wrap:break-word; }}
   /* the label sits in a nested flex box, so align that too or it centres */
   section[data-testid="stSidebar"] .stButton>button>div,
   section[data-testid="stSidebar"] .stButton>button [data-testid="stMarkdownContainer"] {{
       width:100%; text-align:left; justify-content:flex-start;
-      display:flex; align-items:center; }}
+      display:flex; align-items:center; flex-wrap:wrap; }}
   section[data-testid="stSidebar"] .stButton>button:hover {{
       background:{NAV_BG_2}; border-color:transparent; color:#fff; }}
   section[data-testid="stSidebar"] .stButton>button[kind="primary"] {{
       background:{ACCENT}26; border-color:transparent; color:#ffffff;
-      font-weight:640; box-shadow:inset 2px 0 0 {ACCENT_2};
-      padding:.42rem .6rem; }}
+      font-weight:650; box-shadow:inset 2px 0 0 {ACCENT_2};
+      padding:.5rem .65rem; }}
   section[data-testid="stSidebar"] .stButton>button[kind="primary"]:hover {{
       background:{ACCENT}33; color:#fff; }}
   section[data-testid="stSidebar"] div[data-testid="stExpander"] {{

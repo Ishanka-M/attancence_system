@@ -1546,9 +1546,9 @@ elif page == "Dashboard":
     ui.section("Requires Action", "ASNs that are not yet fully complete", 5)
     need = summ[summ["OVERALL"] != schema.S_COMPLETE]
     if need.empty:
-        st.success("✅ All ASNs are fully complete!", icon="✓")
+        st.success("✅ All ASNs are fully complete!")
     else:
-        st.warning(f"⚠️ {len(need)} ASN(s) require action", icon="!")
+        st.warning(f"⚠️ {len(need)} ASN(s) require action")
         show(pick(need, ["ASN NO", "TOTAL LINES", "MATCHED LINES", "MISSING LINES",
                    "MISMATCH LINES", "EXTRA LINES", "STATUS", "KORBER GRN",
                    "AX GRN", "LAST RECON"]), height=300)
