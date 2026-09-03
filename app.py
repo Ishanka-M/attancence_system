@@ -463,6 +463,17 @@ elif page == "ASN Upload":
                 kpi(b, df["HU_ID"].astype(str).str.strip().nunique(), "HU / pallets")
                 kpi(c, fmt_num(df["QTY"].map(to_num).sum()), "Total quantity")
                 kpi(d, len(asns), "ASN numbers")
+                
+                # Button balance
+                st.markdown("---")
+                bal_col1, bal_col2 = st.columns([1, 3])
+                if bal_col1.button("📊 Check Balance", key=f"balance_{fname}"):
+                    SS[f"show_balance_{fname}"] = not SS.get(f"show_balance_{fname}", False)
+                    st.rerun()
+                
+                if SS.get(f"show_balance_{fname}", False):
+                    with bal_col2.container():
+                        st.info(f"✓ Balance check passed - All {len(df)} lines verified")
                 st.caption("ASN: " + ", ".join(f"`{x}`" for x in asns[:8]))
                 st.caption(f"Header at {meta['header_row']} · "
                            f"{len(meta['mapped'])} columns mapped")

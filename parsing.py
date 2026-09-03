@@ -428,3 +428,38 @@ def pdf_page_count(file_bytes: bytes) -> int:
         return len(PdfReader(io.BytesIO(file_bytes)).pages)
     except Exception:
         return 0
+
+
+def extract_images(file_bytes: bytes) -> list:
+    """Extract images from Excel file (openpyxl approach)."""
+    try:
+        from openpyxl import load_workbook
+        wb = load_workbook(io.BytesIO(file_bytes))
+        images = []
+        for ws in wb.sheetnames:
+            sheet = wb[ws]
+            if hasattr(sheet, '_images'):
+                for img in sheet._images:
+                    images.append(img)
+        return images
+    except Exception:
+        # Return empty list if no images or error occurs
+        return []
+
+
+def extract_pdf_images(file_bytes: bytes) -> list:
+    """Extract images from PDF file."""
+    try:
+        import pdfplumber
+        images = []
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+            for page_num, page in enumerate(pdf.pages):
+                if hasattr(page, 'images'):
+                    page_images = page.images
+                    if page_images:
+                        images.extend([
+                            {"page": page_num + 1, "count": len(page_images)}
+                        ])
+        return images
+    except Exception:
+        return []
