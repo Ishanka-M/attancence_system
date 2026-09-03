@@ -52,15 +52,31 @@ def inject_css():
 <style>
   /* ── base ─────────────────────────────────────────────── */
   .stApp {{ background:{BG}; }}
-  .block-container {{ padding-top:1.4rem; padding-bottom:3.5rem; max-width:1460px; }}
+
+  /* Streamlit's toolbar floats over the page, so clear room for it and
+     let the page scroll underneath instead of being hidden by it. */
+  header[data-testid="stHeader"] {{ background:transparent; height:2.5rem;
+      z-index:9; }}
+  header[data-testid="stHeader"]::before {{ content:none; }}
+  .block-container {{ padding-top:3.4rem; padding-bottom:3.5rem;
+      padding-left:2rem; padding-right:2rem; max-width:1500px; }}
+  @media (max-width:1200px) {{
+    .block-container {{ padding-left:1.1rem; padding-right:1.1rem; }}
+  }}
+
   h1,h2,h3,h4,h5 {{ color:{INK}; letter-spacing:-.015em; font-weight:640; }}
   p, span, label, div {{ color:{INK_2}; }}
   a {{ color:{ACCENT}; text-decoration:none; }}
   a:hover {{ text-decoration:underline; }}
   #MainMenu, footer {{ visibility:hidden; }}
 
+  /* default vertical rhythm is very loose for a dense operations screen */
+  section.main div[data-testid="stVerticalBlock"] {{ gap:.62rem; }}
+  section.main div[data-testid="stHorizontalBlock"] {{ gap:.7rem; }}
+
   /* ── top bar ──────────────────────────────────────────── */
   .tb {{ display:flex; align-items:center; justify-content:space-between;
+         gap:1rem; flex-wrap:wrap;
          background:{SURFACE}; border:1px solid {LINE}; border-radius:12px;
          padding:.7rem 1.1rem; margin-bottom:1.1rem; }}
   .tb .brand {{ display:flex; align-items:center; gap:.65rem; }}
@@ -70,7 +86,13 @@ def inject_css():
                display:flex; align-items:center; justify-content:center; }}
   .tb .name {{ font-size:.95rem; font-weight:660; color:{INK}; line-height:1.15; }}
   .tb .sub {{ font-size:.73rem; color:{FAINT}; }}
-  .tb .meta {{ display:flex; align-items:center; gap:1.35rem; }}
+  .tb .meta {{ display:flex; align-items:center; gap:1.35rem;
+               flex-wrap:wrap; }}
+  @media (max-width:900px) {{
+    .tb {{ padding:.6rem .8rem; }}
+    .tb .meta {{ gap:.9rem; width:100%; justify-content:flex-start; }}
+    .tb .m {{ text-align:left; }}
+  }}
   .tb .m {{ text-align:right; }}
   .tb .m .k {{ font-size:.67rem; color:{FAINT}; letter-spacing:.02em; }}
   .tb .m .v {{ font-size:.82rem; font-weight:600; color:{INK};
@@ -95,15 +117,13 @@ def inject_css():
   .sec .d {{ font-size:.8rem; color:{MUTED}; margin-top:.15rem; }}
 
   /* ── stat cards ───────────────────────────────────────── */
-  .grid {{ display:grid; gap:.7rem; margin:.15rem 0 .35rem 0; }}
-  .g2 {{ grid-template-columns:repeat(2,1fr); }}
-  .g3 {{ grid-template-columns:repeat(3,1fr); }}
-  .g4 {{ grid-template-columns:repeat(4,1fr); }}
-  .g5 {{ grid-template-columns:repeat(5,1fr); }}
-  @media (max-width:1100px) {{
-    .g4,.g5 {{ grid-template-columns:repeat(2,1fr); }}
-    .g3 {{ grid-template-columns:repeat(2,1fr); }}
-  }}
+  /* auto-fit keeps the cards on screen at any width instead of overflowing */
+  .grid {{ display:grid; gap:.7rem; margin:.15rem 0 .35rem 0;
+           grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); }}
+  .g2 {{ grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); }}
+  .g3 {{ grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); }}
+  .g4 {{ grid-template-columns:repeat(auto-fit,minmax(195px,1fr)); }}
+  .g5 {{ grid-template-columns:repeat(auto-fit,minmax(175px,1fr)); }}
   .stat {{ background:{SURFACE}; border:1px solid {LINE}; border-radius:11px;
            padding:.85rem 1rem; position:relative; overflow:hidden;
            transition:border-color .15s ease, box-shadow .15s ease; }}
@@ -121,7 +141,9 @@ def inject_css():
   .bdg + .bdg {{ margin-left:.3rem; }}
 
   /* ── pipeline strip ───────────────────────────────────── */
-  .pipe {{ display:flex; align-items:stretch; gap:.4rem; margin:.2rem 0 .5rem 0; }}
+  .pipe {{ display:flex; align-items:stretch; gap:.4rem; margin:.2rem 0 .5rem 0;
+           flex-wrap:wrap; }}
+  .pipe .seg {{ min-width:150px; }}
   .pipe .seg {{ flex:1; background:{SURFACE}; border:1px solid {LINE};
                 border-radius:11px; padding:.75rem .9rem; position:relative; }}
   .pipe .seg .n {{ font-size:1.35rem; font-weight:660; color:{INK};
@@ -135,7 +157,8 @@ def inject_css():
   @media (max-width:1000px) {{ .pipe {{ flex-wrap:wrap; }} .pipe .arrow {{ display:none; }} }}
 
   /* ── stepper ──────────────────────────────────────────── */
-  .steps {{ display:flex; gap:.45rem; margin:.2rem 0 1rem 0; }}
+  .steps {{ display:flex; gap:.45rem; margin:.2rem 0 1rem 0; flex-wrap:wrap; }}
+  .steps .s {{ min-width:150px; }}
   .steps .s {{ flex:1; background:{SURFACE}; border:1px solid {LINE};
                border-radius:10px; padding:.6rem .8rem; }}
   .steps .s .k {{ display:flex; align-items:center; gap:.45rem;
@@ -196,7 +219,8 @@ def inject_css():
       background:{ACCENT_2}; border-color:{ACCENT_2}; color:#fff; }}
 
   div[data-testid="stDataFrame"] {{ border:1px solid {LINE}; border-radius:10px;
-                                    overflow:hidden; }}
+      overflow:hidden; background:{SURFACE}; }}
+  div[data-testid="stDataFrame"] * {{ font-size:.825rem; }}
   .stDataFrame {{ font-size:.825rem; }}
 
   div[data-testid="stExpander"] {{ border:1px solid {LINE}; border-radius:10px;
@@ -223,6 +247,11 @@ def inject_css():
       border-right:1px solid #1b2634; width:255px !important; }}
   section[data-testid="stSidebar"] * {{ color:{NAV_TEXT}; }}
   section[data-testid="stSidebar"] .block-container {{ padding-top:1.15rem; }}
+  /* the default 1rem gap turns a 13-item menu into a scrolling page */
+  section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {{
+      gap:.1rem; }}
+  section[data-testid="stSidebar"] div[data-testid="stElementContainer"] {{
+      margin:0; }}
 
   .navbrand {{ display:flex; align-items:center; gap:.6rem;
                padding:0 .2rem .9rem .2rem; margin-bottom:.7rem;
@@ -236,17 +265,22 @@ def inject_css():
 
   .navlabel {{ font-size:.66rem; font-weight:700; letter-spacing:.09em;
                text-transform:uppercase; color:#63727f;
-               padding:.75rem .3rem .3rem .3rem; }}
+               padding:.7rem .3rem .22rem .3rem; margin:0; }}
 
   /* nav rows are buttons so only one can ever look active */
-  section[data-testid="stSidebar"] .stButton {{ margin-bottom:.12rem; }}
+  section[data-testid="stSidebar"] .stButton {{ margin:0; }}
   section[data-testid="stSidebar"] .stButton>button {{
       background:transparent; border:1px solid transparent; color:{NAV_TEXT};
       width:100%; justify-content:flex-start; text-align:left;
       padding:.4rem .6rem; font-size:.855rem; font-weight:520;
       border-radius:8px; }}
   section[data-testid="stSidebar"] .stButton>button p {{
-      color:inherit; font-size:.855rem; margin:0; }}
+      color:inherit; font-size:.855rem; margin:0; text-align:left; }}
+  /* the label sits in a nested flex box, so align that too or it centres */
+  section[data-testid="stSidebar"] .stButton>button>div,
+  section[data-testid="stSidebar"] .stButton>button [data-testid="stMarkdownContainer"] {{
+      width:100%; text-align:left; justify-content:flex-start;
+      display:flex; align-items:center; }}
   section[data-testid="stSidebar"] .stButton>button:hover {{
       background:{NAV_BG_2}; border-color:transparent; color:#fff; }}
   section[data-testid="stSidebar"] .stButton>button[kind="primary"] {{
@@ -392,8 +426,10 @@ def nav_footer(rows: list[tuple[str, str]]):
 
 
 def chart(fig, height=300, legend=False):
+    """Apply the house chart style. bargap keeps bars from filling the plot
+    when a chart only has two or three categories."""
     fig.update_layout(
-        template="simple_white", height=height,
+        template="simple_white", height=height, bargap=0.45,
         margin=dict(t=8, b=8, l=8, r=8),
         font=dict(family="system-ui, -apple-system, Segoe UI, sans-serif",
                   size=12, color=INK),

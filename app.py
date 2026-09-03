@@ -41,6 +41,13 @@ def fig_style(fig, height=300, legend=False):
     return ui.chart(fig, height, legend)
 
 
+def bar_height(n: int, per: int = 42, base: int = 80,
+               lo: int = 150, hi: int = 420) -> int:
+    """Chart height that follows the number of bars, so a two-category
+    chart does not stretch its bars across a tall empty box."""
+    return max(lo, min(base + per * max(int(n), 1), hi))
+
+
 def pick(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
     """
     Select only the columns that actually exist.
@@ -1500,7 +1507,7 @@ elif page == "Dashboard":
             text=vc.values, textposition="outside", cliponaxis=False))
         fig.update_layout(xaxis=dict(showticklabels=False, showgrid=False),
                           yaxis=dict(showgrid=False))
-        st.plotly_chart(fig_style(fig, 290), width="stretch")
+        st.plotly_chart(fig_style(fig, bar_height(len(vc))), width="stretch")
 
     with c2:
         st.markdown("###### Line match result")
@@ -1517,7 +1524,7 @@ elif page == "Dashboard":
                 text=v.values, textposition="outside", cliponaxis=False))
             fig.update_layout(xaxis=dict(showticklabels=False, showgrid=False),
                               yaxis=dict(showgrid=False))
-            st.plotly_chart(fig_style(fig, 290), width="stretch")
+            st.plotly_chart(fig_style(fig, bar_height(len(v))), width="stretch")
 
     c1, c2 = st.columns([3, 2])
     with c1:
@@ -1531,10 +1538,11 @@ elif page == "Dashboard":
                     orientation="h", marker_color="#cbd3dc")
         fig.add_bar(name="Received", y=top["ASN NO"], x=top["_r"],
                     orientation="h", marker_color=ACCENT)
-        fig.update_layout(barmode="group", bargap=.28,
+        fig.update_layout(barmode="group",
                           yaxis=dict(showgrid=False),
                           xaxis=dict(showgrid=True, gridcolor=LINE))
-        st.plotly_chart(fig_style(fig, 340, legend=True), width="stretch")
+        st.plotly_chart(fig_style(fig, bar_height(len(top), per=34, base=110),
+                                  legend=True), width="stretch")
 
     with c2:
         st.markdown("###### Discrepancies by type")
@@ -1548,7 +1556,7 @@ elif page == "Dashboard":
                 text=v.values, textposition="outside", cliponaxis=False))
             fig.update_layout(xaxis=dict(showticklabels=False, showgrid=False),
                               yaxis=dict(showgrid=False))
-            st.plotly_chart(fig_style(fig, 340), width="stretch")
+            st.plotly_chart(fig_style(fig, bar_height(len(v))), width="stretch")
 
     st.markdown("###### Needs action")
     need = summ[summ["OVERALL"] != schema.S_COMPLETE]
