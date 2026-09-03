@@ -151,6 +151,11 @@ PENDING_HEADERS = [
     "CLEARED AT", "CLEARED BY", "NOTE",
 ]
 
+ATTACHMENTS_HEADERS = [
+    "ATTACH ID", "ASN NO", "INVOICE NUMBER", "FILE NAME", "FILE TYPE",
+    "FILE URL", "SIZE KB", "UPLOADED AT", "UPLOADED BY", "NOTE",
+]
+
 RECON_LOG_HEADERS = [
     "RUN ID", "RUN AT", "RUN BY", "ASN COUNT", "ASN LIST",
     "INVENTORY ROWS", "LINES CHECKED", "MATCHED", "MISSING",
@@ -228,6 +233,12 @@ SHEETS: dict[str, dict] = {
         "kind": "data",
         "key": "PENDING ID",
         "headers": PENDING_HEADERS,
+    },
+    "ATTACHMENTS": {
+        "title": "ATTACHMENTS",
+        "kind": "data",
+        "key": "ATTACH ID",
+        "headers": ATTACHMENTS_HEADERS,
     },
     "RECON_LOG": {
         "title": "RECON_LOG",

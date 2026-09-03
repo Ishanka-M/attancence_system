@@ -25,6 +25,7 @@ import parsing
 import pipeline
 import reporting
 import schema
+import storage
 import ui
 from matching import nkey, now_str
 from parsing import clean, fmt_num, to_num
@@ -417,7 +418,8 @@ page = SS["page"]
 #  SCHEMA CHECK
 # ═══════════════════════════════════════════════════════════════════
 _expected = ["ASN_SUMMARY", "ASN_DETAIL", "INVENTORY", "DISCREPANCY", "AX_GRN",
-             "PENDING", "RECON_LOG", "EMAIL_LOG", "USER-M", "SETTINGS"]
+             "PENDING", "RECON_LOG", "EMAIL_LOG", "USER-M", "SETTINGS",
+             "ATTACHMENTS"]
 _absent = [k for k in _expected if not gsheets.has_sheet(k)]
 if _absent:
     st.error(f"⚠️ Schema mismatch - missing sheets: {', '.join(_absent)}")
@@ -706,6 +708,32 @@ elif page == "ASN Upload":
                                       caption=f"{im['name']} ({im['size_kb']} KB)",
                                       width="stretch")
 
+        # ── attachments (images / scanned PDFs) uploaded to Cloudflare R2 ──
+        all_asns = sorted({clean(a) for p in SS["parsed_asn"].values()
+                           for a in p["df"].get("ASN_NO", []) if clean(a)})
+        attach_files, attach_asns, attach_invoice = [], [], ""
+        if storage.enabled():
+            with st.expander("📎 Attach images / PDFs for this ASN (optional)",
+                             expanded=False):
+                attach_files = st.file_uploader(
+                    "Photos, scanned invoice, delivery note, etc.",
+                    type=["jpg", "jpeg", "png", "webp", "pdf"],
+                    accept_multiple_files=True, key="asn_attach_up")
+                attach_asns = st.multiselect(
+                    "Attach to ASN No", all_asns,
+                    default=all_asns[:1] if len(all_asns) == 1 else [])
+                attach_invoice = st.text_input(
+                    "Invoice Number (optional — lets AX GRN find these "
+                    "files by invoice as well as by ASN No)",
+                    key="asn_attach_inv")
+                if attach_files and not attach_asns:
+                    st.warning("Pick at least one ASN No above so these "
+                               "files can be found again later.")
+        else:
+            st.caption("Cloudflare R2 is not configured, so file "
+                       "attachments are turned off — see storage.py / "
+                       "secrets.toml.example.")
+
         ui.section("Save", "Writes the ASN lines and the summary.", 3)
         targets = st.multiselect("Save to", ["ASN_SUMMARY", "ASN_DETAIL"],
                                  default=["ASN_SUMMARY", "ASN_DETAIL"])
@@ -778,6 +806,35 @@ elif page == "ASN Upload":
                     if (~fresh).any():
                         st.caption(f"{int((~fresh).sum())} ASN(s) already existed - "
                                    f"their GRN status was left untouched.")
+
+                if attach_files and attach_asns:
+                    up_rows, failed = [], []
+                    for f in attach_files:
+                        b = f.getvalue()
+                        for asn in attach_asns:
+                            try:
+                                key = storage.object_key(asn, f.name)
+                                url = storage.upload(b, key, f.type)
+                                up_rows.append({
+                                    "ATTACH ID": uuid.uuid4().hex[:10].upper(),
+                                    "ASN NO": asn,
+                                    "INVOICE NUMBER": clean(attach_invoice),
+                                    "FILE NAME": f.name,
+                                    "FILE TYPE": "PDF" if f.name.lower().endswith(".pdf") else "IMAGE",
+                                    "FILE URL": url,
+                                    "SIZE KB": round(len(b) / 1024, 1),
+                                    "UPLOADED AT": ts, "UPLOADED BY": user,
+                                    "NOTE": "",
+                                })
+                            except Exception as e:
+                                failed.append(f"{f.name}: {e}")
+                    if up_rows:
+                        gsheets.upsert("ATTACHMENTS", up_rows)
+                        st.success(f"📎 {len(up_rows)} attachment(s) uploaded "
+                                   "to Cloudflare R2 and linked.")
+                    if failed:
+                        st.error("Some attachments failed to upload:\n\n"
+                                 + "\n".join(f"- {x}" for x in failed))
 
             SS["parsed_asn"] = {}
             st.info("Next: upload the Korber inventory - reconciliation runs "
@@ -1465,6 +1522,39 @@ elif page == "Email":
 elif page == "AX GRN":
     hero("AX GRN",
          "Korber GRN done → AX GRN pending → AX GRN done → fully complete", "✓")
+
+    # ── attachments — find and download images/PDFs by ASN No or Invoice ──
+    if storage.enabled():
+        with st.expander("📎 Attachments — find by ASN No or Invoice Number",
+                         expanded=False):
+            q = st.text_input("Search ASN No or Invoice Number",
+                              key="ax_attach_q", placeholder="e.g. ASN-10234 or INV-9981")
+            att = gsheets.get_df("ATTACHMENTS")
+            if q.strip() and not att.empty:
+                qn = nkey(q)
+                hit = att[(att["ASN NO"].astype(str).map(nkey) == qn)
+                         | (att["INVOICE NUMBER"].astype(str).map(nkey) == qn)]
+                if hit.empty:
+                    st.caption("No attachments found for that ASN No / Invoice Number.")
+                else:
+                    for _, r in hit.iterrows():
+                        c1, c2, c3 = st.columns([3, 1.2, 1])
+                        c1.markdown(f"**{ui.esc(r['FILE NAME'])}**  \n"
+                                   f"<span style='color:{MUTED};font-size:.8rem'>"
+                                   f"ASN {ui.esc(r['ASN NO'])}"
+                                   + (f" · Invoice {ui.esc(r['INVOICE NUMBER'])}"
+                                      if clean(r['INVOICE NUMBER']) else "")
+                                   + f" · {ui.esc(r['SIZE KB'])} KB · {ui.esc(r['UPLOADED AT'])}"
+                                     "</span>", unsafe_allow_html=True)
+                        c2.markdown(ui.badge(r["FILE TYPE"], "info"),
+                                   unsafe_allow_html=True)
+                        c3.link_button("⬇ Download", r["FILE URL"],
+                                      use_container_width=True)
+            elif q.strip():
+                st.caption("No attachments recorded yet.")
+    elif gsheets.has_sheet("ATTACHMENTS"):
+        st.caption("Cloudflare R2 is not configured — attachment downloads "
+                   "are turned off. See storage.py / secrets.toml.example.")
 
     ax = gsheets.get_df("AX_GRN")
     if ax.empty:
