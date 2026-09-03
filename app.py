@@ -1717,6 +1717,126 @@ elif page == "Dashboard":
                    "MISMATCH LINES", "EXTRA LINES", "STATUS", "KORBER GRN",
                    "AX GRN", "LAST RECON"]), height=300)
 
+    # Bottom quick stats section
+    st.markdown("---")
+    st.markdown("""
+    <style>
+      .bottom-stats {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin-top: 1.5rem;
+        padding: 1.5rem 0;
+      }
+      
+      .stat-pill {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 1.2rem 1.8rem;
+        background: linear-gradient(135deg, #0e1621 0%, #16202d 100%);
+        border: 1px solid #1e2937;
+        border-radius: 10px;
+        min-width: 140px;
+        transition: all 0.3s ease;
+        cursor: default;
+      }
+      
+      .stat-pill:hover {
+        border-color: #0d6e63;
+        box-shadow: 0 4px 12px rgba(13, 110, 99, 0.15);
+        transform: translateY(-2px);
+      }
+      
+      .stat-pill-value {
+        font-size: 1.8rem;
+        font-weight: 720;
+        color: #0d6e63;
+        line-height: 1;
+      }
+      
+      .stat-pill-label {
+        font-size: 0.8rem;
+        color: #7d8b9a;
+        margin-top: 0.5rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-weight: 600;
+      }
+      
+      .stat-pill.pending {
+        border-left: 3px solid #f59e0b;
+      }
+      
+      .stat-pill.pending .stat-pill-value {
+        color: #f59e0b;
+      }
+      
+      .stat-pill.open {
+        border-left: 3px solid #ef4444;
+      }
+      
+      .stat-pill.open .stat-pill-value {
+        color: #ef4444;
+      }
+      
+      .stat-pill.complete {
+        border-left: 3px solid #10b981;
+      }
+      
+      .stat-pill.complete .stat-pill-value {
+        color: #10b981;
+      }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Create bottom stats HTML
+    stats_html = '<div class="bottom-stats">'
+    
+    # ASNs count
+    stats_html += f'''
+    <div class="stat-pill">
+      <div class="stat-pill-value">{n_asn}</div>
+      <div class="stat-pill-label">ASNs</div>
+    </div>
+    '''
+    
+    # AX Pending count
+    stats_html += f'''
+    <div class="stat-pill pending">
+      <div class="stat-pill-value">{n_axp}</div>
+      <div class="stat-pill-label">AX Pending</div>
+    </div>
+    '''
+    
+    # Open Issues count
+    stats_html += f'''
+    <div class="stat-pill open">
+      <div class="stat-pill-value">{n_open}</div>
+      <div class="stat-pill-label">Open Issues</div>
+    </div>
+    '''
+    
+    # Completed count
+    stats_html += f'''
+    <div class="stat-pill complete">
+      <div class="stat-pill-value">{n_comp}</div>
+      <div class="stat-pill-label">Completed</div>
+    </div>
+    '''
+    
+    # Match Rate
+    stats_html += f'''
+    <div class="stat-pill">
+      <div class="stat-pill-value">{rate:.0f}%</div>
+      <div class="stat-pill-label">Match Rate</div>
+    </div>
+    '''
+    
+    stats_html += '</div>'
+    st.markdown(stats_html, unsafe_allow_html=True)
+
 
 # ═══════════════════════════════════════════════════════════════════
 #  DATA MANAGER
