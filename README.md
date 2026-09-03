@@ -42,11 +42,56 @@ confirming, no button chasing.
 | **Search** | Find any HU, ASN, item, lot, PO, GRN or vendor across sheets |
 | **Discrepancies** | Summary and line level, severity, Excel export, manual close |
 | **Email** | Generate or reopen the Markdown discrepancy email |
-| **AX GRN** | Pending queue with attachment downloads, then Mark AX GRN done |
+| **AX GRN** | Pending queue with attachment downloads, override push, then Mark AX GRN done |
+| **Pending List** | Every GRN held at Korber or AX, with the reason, remark, priority and follow-up |
 | **Attachments** | Every photo and PDF, with preview, download and delete |
 | **Setup** | Sheets, matching rules, automation, attachments, API and quota |
 | **Data Manager** | Edit any sheet directly (admin) |
 | **Maintenance** | Delete an ASN, clear a sheet, reset the database (admin) |
+
+---
+
+## Pending register
+
+Any GRN that is held up gets a row in the `PENDING` sheet, one per ASN per
+stage, so the hold-ups are a maintained list rather than something you
+re-derive each time.
+
+* Reconciliation keeps it current by itself: an ASN short of Korber GRN done
+  gets a hold with an auto reason (`2 line(s) not received; 1 line(s)
+  mismatched`), one that has passed gets its Korber hold cleared and an
+  `Awaiting AX posting` hold opened instead.
+* Operators add the **reason, remark, priority and follow-up** on the Pending
+  List page. A remark you write is never overwritten by a later
+  reconciliation — only the auto reason is refreshed.
+* When a corrected inventory makes the ASN tally, the hold clears itself with
+  `CLEARED BY = auto`. Posting the AX GRN clears the AX hold the same way.
+* A hold that comes back re-opens the same row rather than adding a duplicate.
+
+## Sending to AX with a discrepancy
+
+Sometimes an ASN has to be posted even though it still carries a variance.
+On the AX GRN page, **Send to AX despite a discrepancy** lists every ASN that
+is not complete and not already queued, showing how many open discrepancy
+lines each one has. A reason and a **remark are required**, plus an explicit
+confirmation. The push records `OVERRIDE = Y`, the reason and the remark on
+the `AX_GRN` row, and opens a high-priority AX hold in the pending register
+noting how many discrepancy lines were outstanding at the time.
+
+## Finalize summary report
+
+One workbook covering the whole position, downloadable from the Dashboard,
+the Pending List and the AX GRN page:
+
+| Sheet | Contents |
+|---|---|
+| Overview | Counts, tally rate, quantity variance, overrides used |
+| Pending | ASNs not complete, with the stage, hold reason and remark |
+| Pending register | Every hold, open and cleared |
+| Discrepancies | Open discrepancy lines |
+| Completed | Fully complete ASNs with both GRN references |
+| All ASN | The full summary |
+| Line details | Every line with its match result |
 
 ---
 

@@ -36,9 +36,47 @@ AX_NA = "-"
 AX_PENDING = "PENDING"
 AX_DONE = "DONE"
 
+P_OPEN = "OPEN"
+P_CLEARED = "CLEARED"
+
+STAGE_KORBER = "KORBER GRN"
+STAGE_AX = "AX GRN"
+
+PENDING_REASONS = {
+    STAGE_KORBER: [
+        "Goods not yet received",
+        "Short shipment",
+        "Excess received",
+        "Damaged / QC hold",
+        "Wrong item or lot",
+        "Awaiting supplier confirmation",
+        "Documentation pending",
+        "WMS / system issue",
+        "Not yet reconciled",
+        "Other",
+    ],
+    STAGE_AX: [
+        "Interface error",
+        "Awaiting finance approval",
+        "Invoice not received",
+        "Discrepancy accepted - posting with variance",
+        "Master data missing",
+        "Awaiting management approval",
+        "Other",
+    ],
+}
+
+PRIORITIES = ["Normal", "High", "Critical"]
+
 D_OPEN = "OPEN"
 D_RESOLVED = "RESOLVED"
 D_CLOSED = "CLOSED"
+
+# Pending register - a GRN held up at either stage, with the reason
+STAGE_KORBER = "KORBER GRN"
+STAGE_AX = "AX GRN"
+P_OPEN = "OPEN"
+P_CLEARED = "CLEARED"
 
 # ASN level status
 S_NEW = "NEW"
@@ -107,7 +145,13 @@ AX_GRN_HEADERS = [
     "ASN NO", "CLIENT CODE", "KORBER GRN NO", "KORBER GRN DATE",
     "TOTAL LINES", "TOTAL QTY", "PUSHED AT", "PUSHED BY",
     "AX GRN", "AX GRN NO", "AX GRN DATE", "AX GRN BY",
-    "OVERALL", "REMARK",
+    "OVERALL", "OVERRIDE", "OVERRIDE REASON", "REMARK",
+]
+
+PENDING_HEADERS = [
+    "PENDING ID", "ASN NO", "STAGE", "REASON", "REMARK", "PRIORITY",
+    "RAISED AT", "RAISED BY", "FOLLOW UP", "STATUS",
+    "CLEARED AT", "CLEARED BY", "NOTE",
 ]
 
 ASN_IMAGES_HEADERS = [
@@ -195,6 +239,12 @@ SHEETS: dict[str, dict] = {
         "kind": "data",
         "key": "ASN NO",
         "headers": AX_GRN_HEADERS,
+    },
+    "PENDING": {
+        "title": "PENDING",
+        "kind": "data",
+        "key": "PENDING ID",
+        "headers": PENDING_HEADERS,
     },
     "ASN_IMAGES": {
         "title": "ASN_IMAGES",

@@ -41,6 +41,18 @@ def fig_style(fig, height=300, legend=False):
     return ui.chart(fig, height, legend)
 
 
+def finalize_bytes() -> bytes:
+    """Build the finalize summary workbook from whatever is on the sheets."""
+    st_ = gsheets.settings_dict()
+    return reporting.finalize_report(
+        gsheets.get_df("ASN_SUMMARY"), gsheets.get_df("ASN_DETAIL"),
+        gsheets.get_df("DISCREPANCY"), gsheets.get_df("AX_GRN"),
+        gsheets.get_df("PENDING"),
+        company=st_.get("COMPANY", "EFL"), site=st_.get("SITE", ""),
+        client=st_.get("CLIENT_CODE", ""),
+        generated_by=SS.get("user") or "")
+
+
 def bar_height(n: int, per: int = 42, base: int = 80,
                lo: int = 150, hi: int = 420) -> int:
     """Chart height that follows the number of bars, so a two-category
@@ -186,13 +198,14 @@ except Exception as e:
 GROUPS = [
     ("Overview", ["Dashboard"]),
     ("Daily work", ["ASN Upload", "Inventory", "AX GRN"]),
-    ("Review", ["Reconciliation", "ASN Register", "Discrepancies", "Email",
-                "Attachments", "Search"]),
+    ("Review", ["Reconciliation", "ASN Register", "Pending List",
+                "Discrepancies", "Email", "Attachments", "Search"]),
     ("Admin", ["Setup", "Data Manager", "Maintenance"]),
 ]
 ICONS = {
     "Dashboard": "◧", "ASN Upload": "↑", "Inventory": "▤", "AX GRN": "✓",
-    "Reconciliation": "⇄", "ASN Register": "☰", "Discrepancies": "!",
+    "Reconciliation": "⇄", "ASN Register": "☰", "Pending List": "◔",
+    "Discrepancies": "!",
     "Email": "✉", "Attachments": "◫", "Search": "⌕", "Setup": "⚙",
     "Data Manager": "▦", "Maintenance": "⚑",
 }
@@ -807,6 +820,12 @@ elif page == "Inventory":
         kpi(c3, len(R["discrepancies"]), "Discrepancies outstanding",
             DANGER if len(R["discrepancies"]) else OK)
 
+        pc = R.get("pending") or {}
+        if pc.get("opened") or pc.get("cleared"):
+            st.caption(f"Pending register updated — {pc.get('opened', 0)} hold(s) "
+                       f"open, {pc.get('cleared', 0)} cleared. "
+                       f"Add remarks on the Pending List page.")
+
         if R["resolved"]:
             with st.expander(f"Auto-resolved ({len(R['resolved'])})"):
                 st.write(", ".join(R["resolved"][:80]))
@@ -1129,6 +1148,108 @@ elif page == "Search":
 
 
 # ═══════════════════════════════════════════════════════════════════
+#  PENDING LIST
+# ═══════════════════════════════════════════════════════════════════
+elif page == "Pending List":
+    hero("Pending List",
+         "Every GRN held up at Korber or AX, with the reason and a remark", "◔")
+
+    pend = gsheets.get_df("PENDING")
+    summ = gsheets.get_df("ASN_SUMMARY")
+    asn_opts = sorted({clean(a) for a in summ["ASN NO"] if clean(a)}) \
+        if not summ.empty else []
+
+    openp = pend[pend["STATUS"].astype(str).str.upper() != schema.P_CLEARED] \
+        if not pend.empty else pend
+    k_open = int((openp["STAGE"] == schema.STAGE_KORBER).sum()) if not openp.empty else 0
+    a_open = int((openp["STAGE"] == schema.STAGE_AX).sum()) if not openp.empty else 0
+    no_remark = int((openp["REMARK"].astype(str).str.strip() == "").sum()) \
+        if not openp.empty else 0
+
+    a, b, c, d = st.columns(4)
+    kpi(a, len(openp), "Open holds", WARN if len(openp) else OK)
+    kpi(b, k_open, "Korber GRN pending", WARN)
+    kpi(c, a_open, "AX GRN pending", INFO)
+    kpi(d, no_remark, "Without a remark", DANGER if no_remark else OK,
+        "add a reason so the list stays useful" if no_remark else "all annotated")
+
+    ui.section("Raise or update a hold",
+               "The reconciliation keeps this list current on its own. Add a "
+               "remark here so the reason is recorded against the ASN.")
+    with st.form("raise_pending"):
+        c1, c2 = st.columns(2)
+        r_asn = c1.selectbox("ASN", asn_opts or ["—"])
+        r_stage = c2.selectbox("Stage", [schema.STAGE_KORBER, schema.STAGE_AX])
+        c1, c2 = st.columns(2)
+        reasons = schema.PENDING_REASONS.get(r_stage, ["Other"])
+        r_reason = c1.selectbox("Reason", reasons)
+        r_prio = c2.selectbox("Priority", ["Normal", "High", "Low"])
+        r_remark = st.text_area("Remark", height=80,
+                                placeholder="What is holding it up and what "
+                                            "happens next")
+        c1, c2 = st.columns(2)
+        r_follow = c1.text_input("Follow up with", placeholder="Person or team")
+        r_note = c2.text_input("Note")
+        if st.form_submit_button("Save the hold", type="primary"):
+            if r_asn == "—":
+                st.error("Pick an ASN first.")
+            else:
+                pipeline.raise_pending(
+                    r_asn, r_stage, r_reason, r_remark, r_prio,
+                    SS["user"] or "unknown", r_follow, r_note)
+                st.success(f"{r_asn} recorded as pending at {r_stage}.")
+                st.rerun()
+
+    ui.section("The register")
+    c1, c2, c3 = st.columns(3)
+    f_stage = c1.multiselect("Stage", [schema.STAGE_KORBER, schema.STAGE_AX])
+    f_stat = c2.multiselect("Status", [schema.P_OPEN, schema.P_CLEARED],
+                            default=[schema.P_OPEN])
+    f_txt = c3.text_input("Search an ASN or reason")
+
+    v = pend.copy()
+    if f_stage:
+        v = v[v["STAGE"].isin(f_stage)]
+    if f_stat:
+        v = v[v["STATUS"].isin(f_stat)]
+    if f_txt.strip():
+        q = f_txt.strip()
+        v = v[v.apply(lambda r: q.lower() in " ".join(
+            str(x).lower() for x in r.values), axis=1)]
+
+    show(pick(v, ["ASN NO", "STAGE", "REASON", "REMARK", "PRIORITY",
+                  "RAISED AT", "RAISED BY", "FOLLOW UP", "STATUS",
+                  "CLEARED AT", "CLEARED BY", "NOTE"]),
+         empty_msg="Nothing is on hold.")
+
+    if not v.empty:
+        c1, c2 = st.columns(2)
+        with c1:
+            with st.expander("Clear a hold"):
+                ids = st.multiselect("Pending id", list(v["PENDING ID"]))
+                cnote = st.text_input("Closing note", key="clear_note")
+                if st.button("Clear", disabled=not ids):
+                    pipeline.clear_pending(ids, SS["user"] or "unknown", cnote)
+                    st.success(f"{len(ids)} cleared.")
+                    st.rerun()
+        with c2:
+            st.download_button(
+                "Download the pending list",
+                reporting.build_excel({"Pending": v}),
+                file_name=f"Pending_{date.today():%Y%m%d}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                width="stretch")
+
+    ui.section("Finalize summary report",
+               "Pending, discrepancies and completed ASNs in one workbook.")
+    st.download_button(
+        "Download the finalize report", finalize_bytes(),
+        file_name=f"Finalize_Summary_{date.today():%Y%m%d}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary")
+
+
+# ═══════════════════════════════════════════════════════════════════
 #  DISCREPANCIES
 # ═══════════════════════════════════════════════════════════════════
 elif page == "Discrepancies":
@@ -1308,12 +1429,16 @@ elif page == "AX GRN":
     if pend.empty:
         st.success("Nothing pending.")
     else:
+        remarks = pipeline.pending_remarks()
         view = pend.copy()
         view["ATTACHMENTS"] = view["ASN NO"].astype(str).map(
             lambda a_: counts.get(str(a_).strip(), 0))
-        show(pick(view, ["ASN NO", "CLIENT CODE", "KORBER GRN NO", "KORBER GRN DATE",
-                   "TOTAL LINES", "TOTAL QTY", "ATTACHMENTS", "PUSHED AT",
-                   "PUSHED BY", "REMARK"]))
+        view["HOLD REASON"] = view["ASN NO"].astype(str).map(
+            lambda a_: remarks.get(clean(a_), ""))
+        show(pick(view, ["ASN NO", "CLIENT CODE", "KORBER GRN NO",
+                         "KORBER GRN DATE", "TOTAL LINES", "TOTAL QTY",
+                         "OVERRIDE", "ATTACHMENTS", "HOLD REASON",
+                         "OVERRIDE REASON", "REMARK", "PUSHED AT", "PUSHED BY"]))
 
         ui.section("Documents for this ASN",
                    "Download the ASN document or the photos at full original "
@@ -1353,17 +1478,79 @@ elif page == "AX GRN":
             det.loc[md, "REMARK"] = f"AX GRN done {ts}"
             gsheets.overwrite("ASN_DETAIL", det)
 
+            pipeline.clear_stage(sel, schema.STAGE_AX, user)
+
             st.success(f"{len(sel)} ASN(s) are now fully complete.")
             st.balloons()
             st.rerun()
 
+    ui.section("Send to AX despite a discrepancy",
+               "For ASNs that still carry a discrepancy but have to be posted. "
+               "The override, the reason and your remark are all recorded.")
+
+    summ_all = gsheets.get_df("ASN_SUMMARY")
+    already = set(ax["ASN NO"].astype(str)) if not ax.empty else set()
+    blocked = []
+    if not summ_all.empty:
+        m = ((summ_all["OVERALL"] != schema.S_COMPLETE)
+             & (~summ_all["ASN NO"].astype(str).isin(already)))
+        blocked = sorted({clean(a) for a in summ_all.loc[m, "ASN NO"] if clean(a)})
+
+    if not blocked:
+        st.caption("Every ASN with an outstanding issue is already in the queue.")
+    else:
+        disc_all = gsheets.get_df("DISCREPANCY")
+        open_counts = {}
+        if not disc_all.empty:
+            o = disc_all[disc_all["STATUS"].astype(str).str.upper() == schema.D_OPEN]
+            open_counts = o.groupby(o["ASN NO"].astype(str)).size().to_dict()
+
+        with st.form("override_push"):
+            sel_o = st.multiselect(
+                "ASNs to send", blocked, key="ov_asns",
+                format_func=lambda a: (f"{a} — {open_counts.get(a, 0)} open "
+                                       f"discrepancy line(s)"))
+            c1, c2 = st.columns([1, 2])
+            o_reason = c1.selectbox("Reason",
+                                    schema.PENDING_REASONS[schema.STAGE_AX],
+                                    key="ov_reason")
+            o_remark = c2.text_area(
+                "Remark (required)", height=80, key="ov_remark",
+                placeholder="Why this is being posted with the variance, and "
+                            "who approved it")
+            ack = st.checkbox("I confirm this ASN may be posted with its "
+                              "discrepancy outstanding.", key="ov_ack")
+            go = st.form_submit_button("Send to AX GRN Pending", type="primary")
+
+        if go:
+            if not sel_o:
+                st.error("Pick at least one ASN.")
+            elif not o_remark.strip():
+                st.error("A remark is required for an override.")
+            elif not ack:
+                st.error("Tick the confirmation first.")
+            else:
+                res = pipeline.push_to_ax(sel_o, SS["user"] or "unknown",
+                                          o_reason, o_remark.strip(), True)
+                st.success(f"{res['pushed']} ASN(s) sent to AX GRN Pending with "
+                           f"an override, and added to the pending list.")
+                st.rerun()
+
     ui.section("Fully complete")
     show(done)
 
-    st.download_button("Download the AX queue",
-                       reporting.build_excel({"Pending": pend, "Completed": done}),
-                       file_name=f"AX_GRN_{date.today():%Y%m%d}.xlsx",
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    c1, c2 = st.columns(2)
+    c1.download_button(
+        "Download the AX queue",
+        reporting.build_excel({"Pending": pend, "Completed": done}),
+        file_name=f"AX_GRN_{date.today():%Y%m%d}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        width="stretch")
+    c2.download_button(
+        "Download the finalize report", finalize_bytes(),
+        file_name=f"Finalize_Summary_{date.today():%Y%m%d}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        width="stretch")
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1557,6 +1744,19 @@ elif page == "Dashboard":
             fig.update_layout(xaxis=dict(showticklabels=False, showgrid=False),
                               yaxis=dict(showgrid=False))
             st.plotly_chart(fig_style(fig, bar_height(len(v))), width="stretch")
+
+    ui.section("Finalize summary report",
+               "Pending, discrepancies and completed ASNs in one workbook.")
+    c1, c2 = st.columns([1, 3])
+    c1.download_button(
+        "Download", finalize_bytes(),
+        file_name=f"Finalize_Summary_{date.today():%Y%m%d}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary", width="stretch")
+    holds = pipeline.open_pending()
+    c2.caption(f"{len(holds)} open hold(s) in the pending register"
+               + (" — see the Pending List page for the reasons."
+                  if len(holds) else "."))
 
     st.markdown("###### Needs action")
     need = summ[summ["OVERALL"] != schema.S_COMPLETE]
