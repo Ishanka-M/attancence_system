@@ -245,65 +245,18 @@ def inject_css():
   div[data-testid="stMetric"] {{ background:{SURFACE}; border:1px solid {LINE};
       border-radius:10px; padding:.7rem .9rem; }}
 
-  /* ── sidebar navigation ───────────────────────────────── */
-  section[data-testid="stSidebar"] {{ background:{NAV_BG};
-      border-right:1px solid #1b2634; width:280px !important; max-width:280px; }}
-  section[data-testid="stSidebar"] * {{ color:{NAV_TEXT}; }}
-  section[data-testid="stSidebar"] .block-container {{ padding-top:1.15rem; padding-left:.8rem; padding-right:.8rem; }}
-  /* the default 1rem gap turns a 13-item menu into a scrolling page */
-  section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] {{
-      gap:.15rem; }}
-  section[data-testid="stSidebar"] div[data-testid="stElementContainer"] {{
-      margin:0; }}
+  /* ── sidebar (HIDDEN) ───────────────────────────────────── */
+  section[data-testid="stSidebar"] {{ display: none !important; }}
+  .block-container {{ padding-left: 2rem !important; padding-right: 2rem !important; }}
 
-  .navbrand {{ display:flex; align-items:center; gap:.6rem;
-               padding:0 .2rem .9rem .2rem; margin-bottom:.7rem;
-               border-bottom:1px solid #1e2937; word-wrap:break-word; }}
-  .navbrand .mark {{ width:32px; height:32px; border-radius:9px; flex:none;
-      background:linear-gradient(135deg,{ACCENT},{ACCENT_2}); color:#fff;
-      font-size:.85rem; font-weight:700;
-      display:flex; align-items:center; justify-content:center; }}
-  .navbrand .n {{ font-size:.92rem; font-weight:660; color:#fff; line-height:1.25; word-wrap:break-word; }}
-  .navbrand .s {{ font-size:.72rem; color:#7d8b9a; }}
-
-  .navlabel {{ font-size:.68rem; font-weight:720; letter-spacing:.08em;
-               text-transform:uppercase; color:#66757f;
-               padding:1.15rem .7rem .5rem .7rem; margin:0; line-height:1.3; 
-               word-wrap:break-word; }}
+  .navbrand {{ display: none !important; }}
+  .navlabel {{ display: none !important; }}
+  .navfoot {{ display: none !important; }}
 
   /* nav rows are buttons so only one can ever look active */
-  section[data-testid="stSidebar"] .stButton {{ margin:0; }}
-  /* every nav row shares one box model so the labels line up exactly,
-     whatever the active state */
-  section[data-testid="stSidebar"] .stButton>button {{
-      background:transparent; border:1px solid transparent; color:{NAV_TEXT};
-      width:100%; justify-content:flex-start; text-align:left;
-      padding:.5rem .65rem; font-size:.88rem; font-weight:530;
-      line-height:1.4; min-height:2.3rem; border-radius:8px;
-      box-shadow:inset 2px 0 0 transparent; white-space:normal; word-wrap:break-word; }}
-  section[data-testid="stSidebar"] .stButton>button p {{
-      color:inherit; font-size:.88rem; margin:0; text-align:left; 
-      white-space:normal; word-wrap:break-word; }}
-  /* the label sits in a nested flex box, so align that too or it centres */
-  section[data-testid="stSidebar"] .stButton>button>div,
-  section[data-testid="stSidebar"] .stButton>button [data-testid="stMarkdownContainer"] {{
-      width:100%; text-align:left; justify-content:flex-start;
-      display:flex; align-items:center; flex-wrap:wrap; }}
-  section[data-testid="stSidebar"] .stButton>button:hover {{
-      background:{NAV_BG_2}; border-color:transparent; color:#fff; }}
-  section[data-testid="stSidebar"] .stButton>button[kind="primary"] {{
-      background:{ACCENT}26; border-color:transparent; color:#ffffff;
-      font-weight:650; box-shadow:inset 2px 0 0 {ACCENT_2};
-      padding:.5rem .65rem; }}
-  section[data-testid="stSidebar"] .stButton>button[kind="primary"]:hover {{
-      background:{ACCENT}33; color:#fff; }}
-  section[data-testid="stSidebar"] div[data-testid="stExpander"] {{
-      background:{NAV_BG_2}; border-color:#243040; }}
+  section[data-testid="stSidebar"] .stButton {{ display: none !important; }}
 
-  .navfoot {{ font-size:.72rem; color:#6d7b89; padding:.5rem .3rem 0 .3rem;
-              border-top:1px solid #1e2937; margin-top:.6rem; }}
-  .navfoot .row {{ display:flex; justify-content:space-between; padding:.16rem 0; }}
-  .navfoot b {{ font-weight:600; }}
+  /* Unused - nav moved to top */
 </style>
 """, unsafe_allow_html=True)
 

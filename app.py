@@ -167,14 +167,12 @@ def cfg_recon() -> dict:
     }
 
 
-# ───────────────────────────── sidebar ─────────────────────────────
-ui.nav_brand("ASN / GRN Control", "Korber One · AX · EFL")
-
+# ───────────────────────────── navigation ─────────────────────────────
 try:
     _new_tabs = gsheets.ensure_missing_once()
     _users = gsheets.get_df("USER-M")
 except Exception as e:
-    st.sidebar.error("Could not connect to Google Sheets.")
+    st.error("Could not connect to Google Sheets.")
     st.error(f"**Connection error**\n\n```\n{e}\n```\n\n"
              "Check that `gcp_service_account` and `app.spreadsheet_id` are set "
              "correctly in `.streamlit/secrets.toml`.")
@@ -182,55 +180,221 @@ except Exception as e:
 
 # grouped navigation
 GROUPS = [
-    ("Overview", ["Dashboard"]),
-    ("Daily work", ["ASN Upload", "Inventory", "AX GRN"]),
-    ("Review", ["Reconciliation", "ASN Register", "Pending List",
-                "Discrepancies", "Email", "Search"]),
-    ("Admin", ["Setup", "Data Manager", "Maintenance"]),
+    ("📊 Overview", ["Dashboard"]),
+    ("📦 Daily Work", ["ASN Upload", "Inventory", "AX GRN"]),
+    ("✅ Review", ["Reconciliation", "ASN Register", "Pending List",
+                   "Discrepancies", "Email", "Search"]),
+    ("⚙️ Admin", ["Setup", "Data Manager", "Maintenance"]),
 ]
 PAGES = [p for _, group in GROUPS for p in group]
 SS.setdefault("page", "Dashboard")
 
-for label, group in GROUPS:
-    ui.nav_label(label)
-    for name in group:
-        active = SS["page"] == name
-        if st.sidebar.button(name, key=f"nav_{name}", width="stretch",
-                             type="primary" if active else "secondary"):
-            SS["page"] = name
+# ═══════════════════════════════════════════════════════════════════
+#  TOP NAVIGATION BAR
+# ═══════════════════════════════════════════════════════════════════
+st.markdown("""
+<style>
+  .top-nav-container {
+    background: linear-gradient(90deg, #0e1621 0%, #16202d 100%);
+    border-bottom: 2px solid #0d6e63;
+    padding: 0.8rem 1.2rem;
+    margin: -1rem -1rem 1.5rem -1rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+  
+  .top-nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding-right: 1.5rem;
+    border-right: 1px solid #1e2937;
+    min-width: 200px;
+  }
+  
+  .top-nav-brand-mark {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #0d6e63, #0f8578);
+    color: #fff;
+    font-size: 0.9rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  
+  .top-nav-brand-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  
+  .top-nav-brand-name {
+    color: #fff;
+    font-size: 0.95rem;
+    font-weight: 680;
+    line-height: 1.2;
+  }
+  
+  .top-nav-brand-sub {
+    color: #7d8b9a;
+    font-size: 0.7rem;
+    line-height: 1;
+  }
+  
+  .top-nav-menu {
+    display: flex;
+    gap: 0.2rem;
+    flex: 1;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  
+  .top-nav-group {
+    display: flex;
+    gap: 0.1rem;
+    align-items: center;
+  }
+  
+  .top-nav-group-label {
+    font-size: 0.64rem;
+    font-weight: 720;
+    color: #63727f;
+    text-transform: uppercase;
+    padding: 0 0.5rem;
+    margin-right: 0.3rem;
+    letter-spacing: 0.07em;
+  }
+  
+  .top-nav-right {
+    display: flex;
+    gap: 1rem;
+    margin-left: auto;
+    align-items: center;
+    padding-left: 1rem;
+    border-left: 1px solid #1e2937;
+    flex-wrap: wrap;
+    min-width: 150px;
+  }
+  
+  .top-nav-user-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    text-align: right;
+  }
+  
+  .top-nav-user-name {
+    color: #c8d2dc;
+    font-size: 0.8rem;
+    font-weight: 550;
+    line-height: 1.2;
+  }
+  
+  .top-nav-user-role {
+    color: #7d8b9a;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+</style>
+""", unsafe_allow_html=True)
+
+# Build top navigation HTML
+nav_html = '<div class="top-nav-container">'
+
+# Brand
+nav_html += '''
+<div class="top-nav-brand">
+  <div class="top-nav-brand-mark">GRN</div>
+  <div class="top-nav-brand-text">
+    <div class="top-nav-brand-name">ASN / GRN Control</div>
+    <div class="top-nav-brand-sub">Körber One · AX · EFL</div>
+  </div>
+</div>
+<div class="top-nav-menu">
+'''
+
+# Menu groups with labels
+group_html = []
+for group_label, pages in GROUPS:
+    group_html.append(f'<div class="top-nav-group"><span class="top-nav-group-label">{group_label}</span></div>')
+
+nav_html += ''.join(group_html)
+
+nav_html += '''
+</div>
+<div class="top-nav-right">
+  <div class="top-nav-user-info">
+    <div class="top-nav-user-name">''' + SS.get("user", "Guest") + '''</div>
+    <div class="top-nav-user-role">''' + ("🔓 " + SS.get("role", "user").upper() if SS.get("user") else "Welcome") + '''</div>
+  </div>
+</div>
+</div>
+'''
+
+st.markdown(nav_html, unsafe_allow_html=True)
+
+# Navigation buttons in a clean horizontal layout
+nav_cols = st.columns(len(PAGES))
+for idx, page_name in enumerate(PAGES):
+    with nav_cols[idx % len(PAGES)]:
+        active = SS["page"] == page_name
+        if st.button(
+            page_name,
+            key=f"nav_{page_name}",
+            use_container_width=True,
+            type="primary" if active else "secondary"
+        ):
+            SS["page"] = page_name
             st.rerun()
+
 page = SS["page"]
 
-st.sidebar.markdown('<div class="navlabel">Session</div>', unsafe_allow_html=True)
-names = [n for n in _users["USER NAME"].astype(str) if n.strip()] \
-    if not _users.empty else []
-who = st.sidebar.selectbox("Operator", ["Select"] + names + ["Add a name"],
-                           index=0, label_visibility="collapsed")
-if who == "Add a name":
-    who = st.sidebar.text_input("Name", value=SS.get("user", ""))
-SS["user"] = "" if who == "Select" else who
+# Session info section
+st.markdown("---")
+col1, col2, col3, col4 = st.columns([1.2, 1.5, 1.2, 1])
 
-with st.sidebar.expander("Admin sign in"):
-    pin = st.text_input("Admin PIN", type="password", key="pin_in")
-    if st.button("Sign in", key="pin_btn"):
-        _s = gsheets.settings_dict()
-        SS["role"] = "admin" if pin == str(_s.get("ADMIN_PIN", "1234")) else "user"
-        st.success("Signed in") if SS["role"] == "admin" else st.error("Wrong PIN")
+with col1:
+    st.markdown("**👤 Operator**")
+    names = [n for n in _users["USER NAME"].astype(str) if n.strip()] \
+        if not _users.empty else []
+    who = st.selectbox("Select", ["Select"] + names + ["Add a name"],
+                       index=0, label_visibility="collapsed", key="operator")
+    if who == "Add a name":
+        who = st.text_input("New name", value=SS.get("user", ""), label_visibility="collapsed")
+    SS["user"] = "" if who == "Select" else who
 
-if st.sidebar.button("Refresh data"):
-    gsheets.refresh()
-    st.rerun()
+with col2:
+    st.markdown("**🔐 Admin Access**")
+    with st.expander("Sign in"):
+        pin = st.text_input("PIN", type="password", key="pin_in", label_visibility="collapsed")
+        if st.button("Verify", key="pin_btn", use_container_width=True):
+            _s = gsheets.settings_dict()
+            SS["role"] = "admin" if pin == str(_s.get("ADMIN_PIN", "1234")) else "user"
+            st.success("✅ Admin access granted") if SS["role"] == "admin" else st.error("❌ Wrong PIN")
 
-if _new_tabs:
-    st.sidebar.info("Created: " + ", ".join(_new_tabs))
+with col3:
+    st.markdown("**🔄 Data**")
+    if st.button("Refresh", key="refresh_btn", use_container_width=True):
+        gsheets.refresh()
+        st.rerun()
+
+with col4:
+    st.markdown("**ℹ️ Status**")
+    if _new_tabs:
+        st.info(f"✅ {len(_new_tabs)} sheets created")
 
 _expected = ["ASN_SUMMARY", "ASN_DETAIL", "INVENTORY", "DISCREPANCY", "AX_GRN",
              "PENDING", "RECON_LOG", "EMAIL_LOG", "USER-M", "SETTINGS"]
 _absent = [k for k in _expected if not gsheets.has_sheet(k)]
 if _absent:
-    st.sidebar.error("schema.py is out of date — missing "
-                     + ", ".join(_absent)
-                     + ". Upload every .py file from the latest package.")
+    st.error(f"⚠️ Schema mismatch - missing sheets: {', '.join(_absent)}")
 
 _st = gsheets.api_stats()
 _bar = DANGER if _st["last_minute"] > _st["limit"] * .8 else "#4bb3a2"
