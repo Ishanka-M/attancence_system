@@ -398,34 +398,54 @@ with pc4:
         if _new_tabs:
             st.info(f"✅ Created sheets: {', '.join(_new_tabs)}")
 
-# Navigation buttons — grouped per category (own row each) rather than one
-# long, cramped row of every page. Much easier to scan, and each row stays
-# readable instead of squeezing 14 buttons across the screen.
+# Navigation — 4 category buttons; clicking one drops down that category's
+# pages below it, like a real dropdown menu. Picking a page closes the
+# dropdown again. The category holding the current page stays highlighted
+# even while closed, so it's always obvious where you are.
+SS.setdefault("nav_open_group", None)
+_group_of = dict(GROUPS)
+_current_group = next((g for g, gp in GROUPS if SS["page"] in gp), GROUPS[0][0])
+
 st.markdown(f"""
 <style>
-  .nav-group-label {{
-      display: flex; align-items: center; height: 2.4rem;
-      font-size: 0.72rem; font-weight: 720; color: {ui.INK_2};
-      text-transform: uppercase; letter-spacing: 0.06em;
+  .nav-dropdown {{
+      background: {ui.SURFACE}; border: 1px solid {ui.LINE};
+      border-radius: 10px; padding: .7rem .8rem .2rem .8rem;
+      margin: -.3rem 0 .8rem 0;
   }}
 </style>
 """, unsafe_allow_html=True)
 
-for glabel, gpages in GROUPS:
-    label_col, *btn_cols = st.columns([1.15] + [1] * len(gpages))
-    label_col.markdown(f'<div class="nav-group-label">{glabel}</div>',
-                       unsafe_allow_html=True)
-    for col, page_name in zip(btn_cols, gpages):
-        with col:
-            active = SS["page"] == page_name
-            if st.button(
-                page_name,
-                key=f"nav_{page_name}",
-                use_container_width=True,
-                type="primary" if active else "secondary"
-            ):
-                SS["page"] = page_name
-                st.rerun()
+cat_cols = st.columns(len(GROUPS))
+for col, (glabel, gpages) in zip(cat_cols, GROUPS):
+    with col:
+        is_open = SS["nav_open_group"] == glabel
+        is_current = glabel == _current_group
+        if st.button(
+            glabel + ("  ▾" if is_open else "  ▸"),
+            key=f"cat_{glabel}",
+            use_container_width=True,
+            type="primary" if (is_open or is_current) else "secondary",
+        ):
+            SS["nav_open_group"] = None if is_open else glabel
+            st.rerun()
+
+if SS["nav_open_group"]:
+    gpages = _group_of[SS["nav_open_group"]]
+    with st.container(border=True):
+        btn_cols = st.columns(len(gpages))
+        for col, page_name in zip(btn_cols, gpages):
+            with col:
+                active = SS["page"] == page_name
+                if st.button(
+                    page_name,
+                    key=f"nav_{page_name}",
+                    use_container_width=True,
+                    type="primary" if active else "secondary",
+                ):
+                    SS["page"] = page_name
+                    SS["nav_open_group"] = None
+                    st.rerun()
 
 page = SS["page"]
 
@@ -1202,13 +1222,14 @@ elif page == "Search":
     hero("Search", "Find any HU, ASN, item, lot, PO, GRN or vendor", "⌕")
 
     SEARCHABLE = ["ASN_DETAIL", "ASN_SUMMARY", "INVENTORY", "DISCREPANCY",
-                  "AX_GRN", "RECON_LOG", "EMAIL_LOG"]
+                  "AX_GRN", "RECON_LOG", "EMAIL_LOG", "ATTACHMENTS"]
 
     c1, c2 = st.columns([3, 2])
     term = c1.text_input("Search", placeholder="ETHT0726 · 26AUG_UPPD_40659 · GRN-40196",
                          key="q_term")
     where = c2.multiselect("Sheets", SEARCHABLE,
-                           default=["ASN_DETAIL", "ASN_SUMMARY", "INVENTORY"])
+                           default=["ASN_DETAIL", "ASN_SUMMARY", "INVENTORY",
+                                    "ATTACHMENTS"])
 
     c1, c2, c3 = st.columns(3)
     exact = c1.checkbox("Exact match", value=False)
@@ -1263,6 +1284,35 @@ elif page == "Search":
             tabs = st.tabs([f"{k} ({len(v)})" for k, v in tabs_data])
             for t, (k, v) in zip(tabs, tabs_data):
                 with t:
+                    if k == "ATTACHMENTS":
+                        imgs = v[v["FILE TYPE"] == "IMAGE"]
+                        others = v[v["FILE TYPE"] != "IMAGE"]
+                        if not imgs.empty:
+                            st.caption(f"{len(imgs)} image(s)")
+                            cols = st.columns(4)
+                            for i, (_, r) in enumerate(imgs.iterrows()):
+                                with cols[i % 4]:
+                                    st.image(r["FILE URL"], width="stretch",
+                                             caption=r["FILE NAME"])
+                                    st.caption(f"ASN {r['ASN NO']}"
+                                              + (f" · Inv {r['INVOICE NUMBER']}"
+                                                 if clean(r['INVOICE NUMBER']) else ""))
+                                    st.link_button("⬇ Download", r["FILE URL"],
+                                                  use_container_width=True,
+                                                  key=f"srch_dl_img_{r['ATTACH ID']}")
+                        if not others.empty:
+                            st.caption(f"{len(others)} other file(s)")
+                            for _, r in others.iterrows():
+                                c1_, c2_, c3_ = st.columns([3, 1.2, 1])
+                                c1_.markdown(f"**{ui.esc(r['FILE NAME'])}**  "
+                                            f"· ASN {ui.esc(r['ASN NO'])}")
+                                c2_.markdown(ui.badge(r["FILE TYPE"], "info"),
+                                            unsafe_allow_html=True)
+                                c3_.link_button("⬇", r["FILE URL"],
+                                               use_container_width=True,
+                                               key=f"srch_dl_other_{r['ATTACH ID']}")
+                        continue
+
                     if q:
                         hit_cols = [c for c in v.columns
                                     if v[c].astype(str).str.contains(
