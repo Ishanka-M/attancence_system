@@ -40,6 +40,18 @@ def fig_style(fig, height=300, legend=False):
     return ui.chart(fig, height, legend)
 
 
+def attach_file_type(filename: str) -> str:
+    """Classify an attachment by extension for the ATTACHMENTS sheet."""
+    ext = str(filename or "").lower().rsplit(".", 1)[-1]
+    if ext == "pdf":
+        return "PDF"
+    if ext in ("xlsx", "xls", "xlsm"):
+        return "EXCEL"
+    if ext in ("jpg", "jpeg", "png", "webp", "gif", "bmp"):
+        return "IMAGE"
+    return "FILE"
+
+
 def finalize_bytes(start_date=None, end_date=None) -> bytes:
     """Build the finalize summary workbook from whatever is on the sheets.
     
@@ -743,16 +755,17 @@ elif page == "ASN Upload":
                                       caption=f"{im['name']} ({im['size_kb']} KB)",
                                       width="stretch")
 
-        # ── attachments (images / scanned PDFs) uploaded to Cloudflare R2 ──
+        # ── attachments (images / PDFs / Excel) uploaded to Cloudflare R2 ──
         all_asns = sorted({clean(a) for p in SS["parsed_asn"].values()
                            for a in p["df"].get("ASN_NO", []) if clean(a)})
         attach_files, attach_asns, attach_invoice = [], [], ""
         if storage.enabled():
-            with st.expander("📎 Attach images / PDFs for this ASN (optional)",
+            with st.expander("📎 Attach images / PDFs / Excel for this ASN (optional)",
                              expanded=False):
                 attach_files = st.file_uploader(
-                    "Photos, scanned invoice, delivery note, etc.",
-                    type=["jpg", "jpeg", "png", "webp", "pdf"],
+                    "Photos, scanned invoice, delivery note, packing list, etc.",
+                    type=["jpg", "jpeg", "png", "webp", "pdf",
+                          "xlsx", "xls", "xlsm"],
                     accept_multiple_files=True, key="asn_attach_up")
                 attach_asns = st.multiselect(
                     "Attach to ASN No", all_asns,
@@ -874,7 +887,7 @@ elif page == "ASN Upload":
                                     "ASN NO": asn,
                                     "INVOICE NUMBER": clean(attach_invoice),
                                     "FILE NAME": f.name,
-                                    "FILE TYPE": "PDF" if f.name.lower().endswith(".pdf") else "IMAGE",
+                                    "FILE TYPE": attach_file_type(f.name),
                                     "FILE URL": url,
                                     "SIZE KB": round(len(b) / 1024, 1),
                                     "UPLOADED AT": ts, "UPLOADED BY": user,
@@ -1555,7 +1568,7 @@ elif page == "Attachments":
     q1, q2, q3 = st.columns([2, 1, 1])
     q = q1.text_input("Search", placeholder="e.g. ASN-10234, INV-9981 or photo.jpg",
                       label_visibility="collapsed")
-    type_f = q2.selectbox("Type", ["All types", "IMAGE", "PDF"])
+    type_f = q2.selectbox("Type", ["All types", "IMAGE", "PDF", "EXCEL"])
     sort_new = q3.selectbox("Sort", ["Newest first", "Oldest first"])
 
     view = att.copy()
@@ -1584,11 +1597,13 @@ elif page == "Attachments":
                     if r["FILE TYPE"] == "IMAGE":
                         st.image(r["FILE URL"], width="stretch")
                     else:
+                        badge_color = {"PDF": DANGER, "EXCEL": OK}.get(
+                            r["FILE TYPE"], MUTED)
                         st.markdown(
                             f"<div style='background:{LINE};border-radius:8px;"
                             f"height:80px;display:flex;align-items:center;"
-                            f"justify-content:center;color:{DANGER};"
-                            f"font-weight:700;font-size:.75rem'>PDF</div>",
+                            f"justify-content:center;color:{badge_color};"
+                            f"font-weight:700;font-size:.75rem'>{r['FILE TYPE']}</div>",
                             unsafe_allow_html=True)
                 with cinfo:
                     st.markdown(f"**{ui.esc(r['FILE NAME'])}**")
