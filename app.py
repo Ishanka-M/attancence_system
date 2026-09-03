@@ -181,7 +181,7 @@ GROUPS = [
     ("📊 Overview", ["Dashboard"]),
     ("📦 Daily Work", ["ASN Upload", "Inventory", "AX GRN"]),
     ("✅ Review", ["Reconciliation", "ASN Register", "Pending List",
-                   "Discrepancies", "Email", "Search"]),
+                   "Discrepancies", "Attachments", "Email", "Search"]),
     ("⚙️ Admin", ["Setup", "Data Manager", "Maintenance"]),
 ]
 PAGES = [p for _, group in GROUPS for p in group]
@@ -398,19 +398,34 @@ with pc4:
         if _new_tabs:
             st.info(f"✅ Created sheets: {', '.join(_new_tabs)}")
 
-# Navigation buttons in a clean horizontal layout
-nav_cols = st.columns(len(PAGES))
-for idx, page_name in enumerate(PAGES):
-    with nav_cols[idx % len(PAGES)]:
-        active = SS["page"] == page_name
-        if st.button(
-            page_name,
-            key=f"nav_{page_name}",
-            use_container_width=True,
-            type="primary" if active else "secondary"
-        ):
-            SS["page"] = page_name
-            st.rerun()
+# Navigation buttons — grouped per category (own row each) rather than one
+# long, cramped row of every page. Much easier to scan, and each row stays
+# readable instead of squeezing 14 buttons across the screen.
+st.markdown(f"""
+<style>
+  .nav-group-label {{
+      display: flex; align-items: center; height: 2.4rem;
+      font-size: 0.72rem; font-weight: 720; color: {ui.INK_2};
+      text-transform: uppercase; letter-spacing: 0.06em;
+  }}
+</style>
+""", unsafe_allow_html=True)
+
+for glabel, gpages in GROUPS:
+    label_col, *btn_cols = st.columns([1.15] + [1] * len(gpages))
+    label_col.markdown(f'<div class="nav-group-label">{glabel}</div>',
+                       unsafe_allow_html=True)
+    for col, page_name in zip(btn_cols, gpages):
+        with col:
+            active = SS["page"] == page_name
+            if st.button(
+                page_name,
+                key=f"nav_{page_name}",
+                use_container_width=True,
+                type="primary" if active else "secondary"
+            ):
+                SS["page"] = page_name
+                st.rerun()
 
 page = SS["page"]
 
@@ -734,6 +749,25 @@ elif page == "ASN Upload":
                        "attachments are turned off — see storage.py / "
                        "secrets.toml.example.")
 
+        # ── block duplicate ASN uploads ──
+        existing_summary = gsheets.get_df("ASN_SUMMARY")
+        existing_asns = set(existing_summary["ASN NO"].astype(str)) \
+            if not existing_summary.empty else set()
+        dup_asns = sorted(set(all_asns) & existing_asns)
+        allow_dup = True
+        if dup_asns:
+            allow_dup = False
+            ui.note(
+                f"{len(dup_asns)} ASN No already exist in the system: "
+                + ", ".join(f"{x}" for x in dup_asns[:15])
+                + (" …" if len(dup_asns) > 15 else "")
+                + ". Duplicate ASN uploads are blocked so lines are not "
+                  "double-counted.",
+                "Duplicate ASN No detected", "danger")
+            allow_dup = st.checkbox(
+                "These are corrected files for the same ASN — update the "
+                "existing record instead of blocking")
+
         ui.section("Save", "Writes the ASN lines and the summary.", 3)
         targets = st.multiselect("Save to", ["ASN_SUMMARY", "ASN_DETAIL"],
                                  default=["ASN_SUMMARY", "ASN_DETAIL"])
@@ -744,7 +778,7 @@ elif page == "ASN Upload":
 
         cA, cB = st.columns([1, 1])
         if cA.button("Save to Google Sheet", type="primary",
-                     disabled=not (confirm and targets and all_ok)):
+                     disabled=not (confirm and targets and all_ok and allow_dup)):
             ts = now_str()
             user = SS["user"] or "unknown"
             det_rows = []
@@ -1440,6 +1474,99 @@ elif page == "Discrepancies":
 
 
 # ═══════════════════════════════════════════════════════════════════
+#  ATTACHMENTS  — every image / PDF uploaded against an ASN, in one
+#  searchable, downloadable place (Cloudflare R2 behind the scenes)
+# ═══════════════════════════════════════════════════════════════════
+elif page == "Attachments":
+    hero("Attachments",
+         "Every photo and PDF uploaded against an ASN — find one by "
+         "ASN No, Invoice Number or file name, then download it", "📎")
+
+    if not storage.enabled():
+        ui.empty("📎", "Cloudflare R2 is not connected",
+                 "Add your R2 account id, keys and bucket to "
+                 ".streamlit/secrets.toml (see secrets.toml.example) to "
+                 "turn attachments on. Nothing else in the app is affected.")
+        st.stop()
+
+    att = gsheets.get_df("ATTACHMENTS")
+    if att.empty:
+        ui.empty("📎", "No attachments yet",
+                 "Upload a photo or PDF against an ASN from the "
+                 "ASN Upload page — it will show up here.")
+        st.stop()
+
+    a, b, c = st.columns(3)
+    kpi(a, len(att), "Files")
+    kpi(b, att["ASN NO"].astype(str).str.strip().nunique(), "ASN No covered")
+    kpi(c, fmt_num(att["SIZE KB"].map(to_num).sum() / 1024), "Total size (MB)")
+
+    ui.section("Find a file", "Search by ASN No, Invoice Number or file name.")
+    q1, q2, q3 = st.columns([2, 1, 1])
+    q = q1.text_input("Search", placeholder="e.g. ASN-10234, INV-9981 or photo.jpg",
+                      label_visibility="collapsed")
+    type_f = q2.selectbox("Type", ["All types", "IMAGE", "PDF"])
+    sort_new = q3.selectbox("Sort", ["Newest first", "Oldest first"])
+
+    view = att.copy()
+    if q.strip():
+        qn = nkey(q)
+        ql = q.strip().lower()
+        view = view[
+            view["ASN NO"].astype(str).map(nkey).eq(qn)
+            | view["INVOICE NUMBER"].astype(str).map(nkey).eq(qn)
+            | view["FILE NAME"].astype(str).str.lower().str.contains(ql, regex=False)
+        ]
+    if type_f != "All types":
+        view = view[view["FILE TYPE"] == type_f]
+    view = view.sort_values("UPLOADED AT", ascending=(sort_new == "Oldest first"))
+
+    st.caption(f"{len(view)} of {len(att)} file(s)")
+
+    if view.empty:
+        st.info("No attachments match that search.")
+    else:
+        is_admin = SS["role"] == "admin"
+        for _, r in view.head(60).iterrows():
+            with st.container(border=True):
+                cimg, cinfo, cdl = st.columns([1, 3, 1.1])
+                with cimg:
+                    if r["FILE TYPE"] == "IMAGE":
+                        st.image(r["FILE URL"], width="stretch")
+                    else:
+                        st.markdown(
+                            f"<div style='background:{LINE};border-radius:8px;"
+                            f"height:80px;display:flex;align-items:center;"
+                            f"justify-content:center;color:{DANGER};"
+                            f"font-weight:700;font-size:.75rem'>PDF</div>",
+                            unsafe_allow_html=True)
+                with cinfo:
+                    st.markdown(f"**{ui.esc(r['FILE NAME'])}**")
+                    st.caption(
+                        f"ASN {r['ASN NO']}"
+                        + (f" · Invoice {r['INVOICE NUMBER']}"
+                           if clean(r['INVOICE NUMBER']) else "")
+                        + f" · {r['SIZE KB']} KB · {r['UPLOADED AT']}"
+                        + (f" · by {r['UPLOADED BY']}" if clean(r['UPLOADED BY']) else ""))
+                with cdl:
+                    st.link_button("⬇ Download", r["FILE URL"],
+                                  use_container_width=True)
+                    if is_admin:
+                        if st.button("🗑 Delete", key=f"del_att_{r['ATTACH ID']}",
+                                    use_container_width=True):
+                            try:
+                                storage.delete(storage.url_to_key(r["FILE URL"]))
+                            except Exception:
+                                pass
+                            full = gsheets.get_df("ATTACHMENTS")
+                            full = full[full["ATTACH ID"] != r["ATTACH ID"]]
+                            gsheets.overwrite("ATTACHMENTS", full)
+                            st.rerun()
+        if len(view) > 60:
+            st.caption(f"Showing the first 60 of {len(view)} — narrow your search to see more.")
+
+
+# ═══════════════════════════════════════════════════════════════════
 #  EMAIL
 # ═══════════════════════════════════════════════════════════════════
 elif page == "Email":
@@ -1523,38 +1650,13 @@ elif page == "AX GRN":
     hero("AX GRN",
          "Korber GRN done → AX GRN pending → AX GRN done → fully complete", "✓")
 
-    # ── attachments — find and download images/PDFs by ASN No or Invoice ──
+    # ── attachments — quick pointer to the dedicated page ──
     if storage.enabled():
-        with st.expander("📎 Attachments — find by ASN No or Invoice Number",
-                         expanded=False):
-            q = st.text_input("Search ASN No or Invoice Number",
-                              key="ax_attach_q", placeholder="e.g. ASN-10234 or INV-9981")
-            att = gsheets.get_df("ATTACHMENTS")
-            if q.strip() and not att.empty:
-                qn = nkey(q)
-                hit = att[(att["ASN NO"].astype(str).map(nkey) == qn)
-                         | (att["INVOICE NUMBER"].astype(str).map(nkey) == qn)]
-                if hit.empty:
-                    st.caption("No attachments found for that ASN No / Invoice Number.")
-                else:
-                    for _, r in hit.iterrows():
-                        c1, c2, c3 = st.columns([3, 1.2, 1])
-                        c1.markdown(f"**{ui.esc(r['FILE NAME'])}**  \n"
-                                   f"<span style='color:{MUTED};font-size:.8rem'>"
-                                   f"ASN {ui.esc(r['ASN NO'])}"
-                                   + (f" · Invoice {ui.esc(r['INVOICE NUMBER'])}"
-                                      if clean(r['INVOICE NUMBER']) else "")
-                                   + f" · {ui.esc(r['SIZE KB'])} KB · {ui.esc(r['UPLOADED AT'])}"
-                                     "</span>", unsafe_allow_html=True)
-                        c2.markdown(ui.badge(r["FILE TYPE"], "info"),
-                                   unsafe_allow_html=True)
-                        c3.link_button("⬇ Download", r["FILE URL"],
-                                      use_container_width=True)
-            elif q.strip():
-                st.caption("No attachments recorded yet.")
-    elif gsheets.has_sheet("ATTACHMENTS"):
-        st.caption("Cloudflare R2 is not configured — attachment downloads "
-                   "are turned off. See storage.py / secrets.toml.example.")
+        att_all = gsheets.get_df("ATTACHMENTS")
+        n_att = len(att_all)
+        st.caption(f"📎 Looking for a photo or scanned document? "
+                   f"{n_att} file(s) are on the **Attachments** page "
+                   "(Review group) — searchable by ASN No or Invoice Number.")
 
     ax = gsheets.get_df("AX_GRN")
     if ax.empty:
