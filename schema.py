@@ -112,7 +112,8 @@ AX_GRN_HEADERS = [
 
 ASN_IMAGES_HEADERS = [
     "IMAGE ID", "ASN NO", "FILE NAME", "KIND", "SOURCE", "MIME", "SIZE KB",
-    "STORAGE", "DRIVE FILE ID", "LINK", "UPLOADED AT", "UPLOADED BY", "NOTE",
+    "QUALITY", "STORAGE", "DRIVE FILE ID", "LINK", "UPLOADED AT",
+    "UPLOADED BY", "NOTE",
 ]
 
 IMAGE_DATA_HEADERS = ["IMAGE ID", "SEQ", "CHUNK"]
@@ -145,8 +146,9 @@ DEFAULT_SETTINGS = [
     ["AUTO_PUSH_AX", "Y", "Move Korber GRN Done ASNs straight to AX GRN Pending (Y/N)"],
     ["AUTO_EMAIL", "Y", "Generate the mismatch email automatically after auto reconciliation (Y/N)"],
     ["IMAGE_STORAGE", "DRIVE", "Where attachments are stored: DRIVE (falls back to SHEET) | SHEET"],
-    ["IMAGE_MAX_PX", "1400", "Maximum image edge in pixels; larger images are resized"],
-    ["IMAGE_QUALITY", "78", "JPEG compression quality (40-95)"],
+    ["KEEP_ORIGINAL", "Y", "Upload images to Drive at original quality with no resizing (Y/N)"],
+    ["IMAGE_MAX_PX", "2200", "Maximum image edge in pixels, used only when an image must be compressed"],
+    ["IMAGE_QUALITY", "92", "JPEG quality used when an image must be compressed (40-95)"],
     ["DRIVE_FOLDER_ID", "https://drive.google.com/drive/u/2/folders/14t0faZpeMAZIxMAV9q7fQB1ryN1Ps7mP",
      "Drive folder for images and PDFs - paste a folder link or an ID"],
     ["API_RATE_LIMIT", "55", "Maximum Google API calls per minute (Google allows 60)"],

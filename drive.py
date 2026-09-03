@@ -133,6 +133,25 @@ def upload_image(data: bytes, filename: str, mime: str,
         return False, f"{type(e).__name__}: {msg[:220]}"
 
 
+def download_file(file_id: str) -> bytes | None:
+    """Fetch a file back from Drive at full, original quality."""
+    if not available() or not str(file_id).strip():
+        return None
+    try:
+        import io as _io
+        from googleapiclient.http import MediaIoBaseDownload
+        req = _service().files().get_media(fileId=file_id,
+                                           supportsAllDrives=True)
+        buf = _io.BytesIO()
+        dl = MediaIoBaseDownload(buf, req, chunksize=2 * 1024 * 1024)
+        done = False
+        while not done:
+            _, done = api(dl.next_chunk)
+        return buf.getvalue()
+    except Exception:
+        return None
+
+
 def delete_file(file_id: str) -> bool:
     if not available() or not str(file_id).strip():
         return False

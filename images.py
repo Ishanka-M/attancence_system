@@ -66,12 +66,13 @@ def compress(data: bytes, mime: str, max_px: int = 1400,
         return data, mime or "image/png"
 
 
-def _opts() -> tuple[str, int, int]:
+def _opts() -> tuple[str, int, int, bool]:
     s = gsheets.settings_dict()
-    mode = str(s.get("IMAGE_STORAGE", "SHEET")).strip().upper() or "SHEET"
-    px = int(gsheets.setting_float(s, "IMAGE_MAX_PX", 1400) or 1400)
-    q = int(gsheets.setting_float(s, "IMAGE_QUALITY", 78) or 78)
-    return mode, px, q
+    mode = str(s.get("IMAGE_STORAGE", "DRIVE")).strip().upper() or "DRIVE"
+    px = int(gsheets.setting_float(s, "IMAGE_MAX_PX", 2200) or 2200)
+    q = int(gsheets.setting_float(s, "IMAGE_QUALITY", 92) or 92)
+    keep = str(s.get("KEEP_ORIGINAL", "Y")).strip().upper() in ("Y", "YES", "TRUE", "1")
+    return mode, px, q, keep
 
 
 # ───────────────────────── save ─────────────────────────
@@ -86,32 +87,42 @@ def save_image(asn: str, filename: str, data: bytes, mime: str,
     if not data:
         return False, f"{filename}: the file is empty."
 
-    mode, px, q = _opts()
+    mode, px, q, keep_original = _opts()
     is_pdf = (str(mime).lower() == "application/pdf"
               or str(filename).lower().endswith(".pdf"))
     kind = kind or ("PDF" if is_pdf else "IMAGE")
 
-    if is_pdf:
-        small, mime2 = data, "application/pdf"      # PDFs are stored as-is
-    else:
-        small, mime2 = compress(data, mime, px, q)
     img_id = uuid.uuid4().hex[:10].upper()
     ts = now_str()
     storage, link, file_id = "SHEET", "", ""
+    small, mime2 = data, (mime or "application/octet-stream")
+    quality = "original"
     msg = ""
 
-    # ── 1. Drive ──
+    # ── 1. Drive: room enough to keep the file exactly as uploaded ──
     if mode == "DRIVE":
+        if is_pdf or keep_original:
+            payload, pmime, pq = data, mime2, "original"
+        else:
+            payload, pmime = compress(data, mime, px, q)
+            pq = "original" if payload is data else f"{px}px q{q}"
         folder = gsheets.settings_dict().get("DRIVE_FOLDER_ID", "")
-        ok, res = drive.upload_image(small, f"{nkey(asn)}_{filename}", mime2, folder)
+        ok, res = drive.upload_image(payload, f"{nkey(asn)}_{filename}",
+                                     pmime, folder)
         if ok:
             storage, link, file_id = "DRIVE", res["link"], res["id"]
+            small, mime2, quality = payload, pmime, pq
         else:
             msg = (f"{filename}: Drive upload failed, saved to the sheet "
                    f"instead ({str(res)[:140]})")
 
-    # ── 2. fall back to the sheet ──
+    # ── 2. sheet fallback: a cell has a hard size limit, so compress ──
     if storage == "SHEET":
+        if is_pdf:
+            small, mime2, quality = data, "application/pdf", "original"
+        else:
+            small, mime2 = compress(data, mime, px, q)
+            quality = "original" if small is data else f"{px}px q{q}"
         if len(small) > MAX_BYTES:
             return False, (f"{filename}: too large for sheet storage "
                            f"({len(small) // 1024} KB). Fix the Drive folder "
@@ -129,6 +140,7 @@ def save_image(asn: str, filename: str, data: bytes, mime: str,
         "SOURCE": source,
         "MIME": mime2,
         "SIZE KB": round(len(small) / 1024, 1),
+        "QUALITY": quality,
         "STORAGE": storage,
         "DRIVE FILE ID": file_id,
         "LINK": link,
@@ -136,10 +148,29 @@ def save_image(asn: str, filename: str, data: bytes, mime: str,
         "UPLOADED BY": user or "unknown",
         "NOTE": note,
     }])
-    return True, msg or f"{filename} ✅ ({round(len(small) / 1024, 1)} KB · {storage})"
+    return True, msg or (f"{filename} saved — {round(len(small) / 1024, 1)} KB, "
+                         f"{quality.lower()}, {storage.lower()}")
 
 
 # ───────────────────────── load ─────────────────────────
+def load_bytes(row) -> bytes | None:
+    """
+    Return the stored file at the quality it was saved with.
+
+    Drive-stored files are fetched back from Drive, so a download gives the
+    original upload rather than a preview-sized copy. `row` is an ASN_IMAGES
+    record (Series or dict); a bare id also works for sheet storage.
+    """
+    if isinstance(row, str):
+        return load_image(row)
+    get = row.get
+    if str(get("STORAGE", "") or "").upper() == "DRIVE":
+        data = drive.download_file(get("DRIVE FILE ID", ""))
+        if data:
+            return data
+    return load_image(get("IMAGE ID", ""))
+
+
 def load_image(img_id: str) -> bytes | None:
     """Reassemble the chunks in IMAGE_DATA back into bytes."""
     df = gsheets.get_df("IMAGE_DATA")
@@ -162,6 +193,11 @@ def delete_images(img_ids: list[str]) -> int:
     ids = {str(i).strip() for i in img_ids if str(i).strip()}
     if not ids:
         return 0
+    meta = gsheets.get_df("ASN_IMAGES")
+    if not meta.empty:
+        for _, r in meta[meta["IMAGE ID"].astype(str).isin(ids)].iterrows():
+            if str(r.get("STORAGE", "")).upper() == "DRIVE":
+                drive.delete_file(r.get("DRIVE FILE ID", ""))
     n = gsheets.delete_where("ASN_IMAGES", "IMAGE ID", ids)
     gsheets.delete_where("IMAGE_DATA", "IMAGE ID", ids)
     return n

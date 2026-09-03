@@ -118,17 +118,28 @@ Images and PDFs are stored in the configured **Google Drive folder**.
   for you. Use **Test the Drive connection** to confirm access.
 * Share the folder with the service account address shown on that page as an
   **Editor**.
-* Images are resized (default 1400 px) and JPEG compressed; a 10 MB photo
-  becomes roughly 500 KB. PDFs are stored untouched.
+* **Drive keeps images at original quality.** Nothing is resized or
+  re-encoded, so a download returns the exact bytes that were uploaded. The
+  `QUALITY` column in `ASN_IMAGES` records this for every file.
+* Compression only happens when a file cannot be kept whole — the sheet
+  fallback, where a cell has a hard size limit. Those settings live under
+  Setup → Attachments → Compression (2200 px, quality 92 by default).
 * If Drive is unavailable the file falls back to the sheet itself — base64
   chunks in `IMAGE_DATA`, metadata in `ASN_IMAGES` — so nothing is lost.
+* PDFs are never compressed, in either mode.
 
 > A Google service account has no Drive storage quota of its own. If uploads
 > return a quota error, move the folder into a **Shared Drive** or set
 > Storage to `SHEET`.
 
 Attachments can be downloaded from the ASN Register, the Attachments page,
-and directly from the AX GRN queue before posting into AX.
+and directly from the AX GRN queue before posting into AX. **Download
+original** fetches the file back from Drive rather than serving a preview,
+so the AX GRN download is the full-resolution original.
+
+Photos *and* PDFs can be attached anywhere files are accepted, including the
+"Photos or PDFs for this ASN" uploader on the ASN Upload page — useful for
+GRN sheets, damage evidence, seal shots and supplier documents.
 
 ---
 
@@ -190,7 +201,8 @@ streamlit run app.py
 
 | File | Responsibility |
 |------|----------------|
-| `app.py` | Streamlit UI, every page |
+| `app.py` | Page behaviour and flow |
+| `ui.py` | Custom HTML/CSS layer — stylesheet, cards, badges, steps, nav |
 | `pipeline.py` | Inventory merge and the automatic reconciliation flow |
 | `matching.py` | Reconciliation engine |
 | `parsing.py` | Excel and PDF parsing, alias mapping, image extraction |
