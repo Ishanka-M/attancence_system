@@ -2156,7 +2156,8 @@ elif page == "Maintenance":
         st.stop()
 
     ASN_SHEETS = {"ASN_SUMMARY": "ASN NO", "ASN_DETAIL": "ASN NO",
-                  "DISCREPANCY": "ASN NO", "AX_GRN": "ASN NO"}
+                  "DISCREPANCY": "ASN NO", "AX_GRN": "ASN NO",
+                  "ATTACHMENTS": "ASN NO"}
 
     t1, t2, t3 = st.tabs(["Delete an ASN", "Clear a sheet", "Reset the database"])
 
@@ -2206,6 +2207,15 @@ elif page == "Maintenance":
                 if st.button("Delete", type="primary",
                              disabled=typed.strip().upper() != "DELETE"):
                     with st.spinner("Deleting..."):
+                        if storage.enabled():
+                            att = gsheets.get_df("ATTACHMENTS")
+                            if not att.empty:
+                                gone = att[att["ASN NO"].astype(str).isin(sel)]
+                                for u in gone["FILE URL"]:
+                                    try:
+                                        storage.delete(storage.url_to_key(u))
+                                    except Exception:
+                                        pass
                         res = {k: gsheets.delete_where(k, col, sel)
                                for k, col in ASN_SHEETS.items()}
                     st.success("Deleted — " +
@@ -2237,7 +2247,7 @@ elif page == "Maintenance":
                  "undone. Take a backup first.")
 
         DATA_SHEETS = ["ASN_SUMMARY", "ASN_DETAIL", "INVENTORY", "DISCREPANCY",
-                       "AX_GRN", "PENDING", "RECON_LOG",
+                       "AX_GRN", "PENDING", "ATTACHMENTS", "RECON_LOG",
                        "EMAIL_LOG"]
         MASTERS = ["USER-M", "SETTINGS"]
 
