@@ -39,13 +39,46 @@ def fig_style(fig, height=300, legend=False):
     return ui.chart(fig, height, legend)
 
 
-def finalize_bytes() -> bytes:
-    """Build the finalize summary workbook from whatever is on the sheets."""
+def finalize_bytes(start_date=None, end_date=None) -> bytes:
+    """Build the finalize summary workbook from whatever is on the sheets.
+    
+    Optionally filters by date range if start_date and end_date are provided.
+    """
     st_ = gsheets.settings_dict()
+    summ = gsheets.get_df("ASN_SUMMARY").copy()
+    det = gsheets.get_df("ASN_DETAIL").copy()
+    disc = gsheets.get_df("DISCREPANCY").copy()
+    ax = gsheets.get_df("AX_GRN").copy()
+    pend = gsheets.get_df("PENDING").copy()
+    
+    # Filter by date range if provided
+    if start_date and end_date:
+        date_col = "CREATED AT" if "CREATED AT" in summ.columns else "UPLOAD DATE" if "UPLOAD DATE" in summ.columns else None
+        if date_col and date_col in summ.columns and not summ.empty:
+            try:
+                summ[date_col] = pd.to_datetime(summ[date_col], errors='coerce')
+                mask = (summ[date_col].dt.date >= start_date) & (summ[date_col].dt.date <= end_date)
+                summ = summ[mask]
+                
+                # Filter detail by ASN numbers in filtered summary
+                if not summ.empty and "ASN NO" in det.columns and "ASN NO" in summ.columns:
+                    asn_nos = set(summ["ASN NO"].dropna())
+                    det = det[det["ASN NO"].isin(asn_nos)]
+                
+                # Filter discrepancies by ASN
+                if not summ.empty and "ASN NO" in disc.columns and "ASN NO" in summ.columns:
+                    asn_nos = set(summ["ASN NO"].dropna())
+                    disc = disc[disc["ASN NO"].isin(asn_nos)]
+                
+                # Filter AX GRN by ASN
+                if not summ.empty and "ASN NO" in ax.columns and "ASN NO" in summ.columns:
+                    asn_nos = set(summ["ASN NO"].dropna())
+                    ax = ax[ax["ASN NO"].isin(asn_nos)]
+            except Exception:
+                pass  # If date filtering fails, use all data
+    
     return reporting.finalize_report(
-        gsheets.get_df("ASN_SUMMARY"), gsheets.get_df("ASN_DETAIL"),
-        gsheets.get_df("DISCREPANCY"), gsheets.get_df("AX_GRN"),
-        gsheets.get_df("PENDING"),
+        summ, det, disc, ax, pend,
         company=st_.get("COMPANY", "EFL"), site=st_.get("SITE", ""),
         client=st_.get("CLIENT_CODE", ""),
         generated_by=SS.get("user") or "")
@@ -1400,7 +1433,7 @@ elif page == "Dashboard":
     log = gsheets.get_df("RECON_LOG")
 
     last = clean(log["RUN AT"].iloc[-1]) if not log.empty else "not yet run"
-    hero("Dashboard", f"ASN → Korber GRN → AX GRN · last reconciliation {last}", "◧")
+    hero("Dashboard", f"ASN → Korber GRN → AX GRN Processing Pipeline · Last reconciliation {last}", "📊")
 
     if summ.empty:
         ui.empty("◧", "Nothing to show yet",
@@ -1421,108 +1454,104 @@ elif page == "Dashboard":
     rate = (tally / lines * 100) if lines else 0
     pending = n_asn - n_comp
 
+    # Professional summary cards layout
+    ui.section("Processing Summary", "Current status of all ASN shipments in the system", 1)
+    
     a, b, c, d = st.columns(4)
-    kpi(a, n_asn, "ASNs in the system",
-        note=f"{lines} lines · {fmt_num(asn_qty)} expected")
-    kpi(b, f"{rate:.0f}%", "Lines tallied", ACCENT, f"{tally} of {lines}")
-    kpi(c, n_open, "Open discrepancies", DANGER if n_open else OK,
-        f"{n_res} auto-resolved" if n_res else "all clear")
-    kpi(d, pending, "ASNs not complete", WARN if pending else OK,
-        f"{n_comp} fully complete")
+    kpi(a, n_asn, "Total ASNs",
+        note=f"{lines} lines · {fmt_num(asn_qty)} qty")
+    kpi(b, f"{rate:.0f}%", "Match Rate", ACCENT, f"{tally}/{lines} lines")
+    kpi(c, n_open, "Open Issues", DANGER if n_open else OK,
+        f"{n_res} resolved")
+    kpi(d, pending, "Pending ASNs", WARN if pending else OK,
+        f"{n_comp} complete")
 
-    st.markdown("##### Pipeline")
+    # Pipeline visualization
+    st.markdown("")
+    ui.section("Processing Pipeline", "Movement through each stage of the GRN process", 2)
     pipeline_strip([
-        ("ASN uploaded", n_asn, MUTED),
-        ("Korber GRN done", n_korber, ACCENT),
-        ("AX GRN pending", n_axp, INFO),
-        ("Fully complete", n_comp, OK),
+        ("ASN Uploaded", n_asn, MUTED),
+        ("Körber GRN Done", n_korber, ACCENT),
+        ("AX GRN Pending", n_axp, INFO),
+        ("Fully Complete", n_comp, OK),
     ])
 
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("###### ASNs by status")
-        vc = summ["STATUS"].replace("", schema.S_NEW).value_counts().sort_values()
-        fig = go.Figure(go.Bar(
-            x=vc.values, y=vc.index, orientation="h",
-            marker_color=[schema.STATUS_COLORS.get(i, MUTED) for i in vc.index],
-            text=vc.values, textposition="outside", cliponaxis=False))
-        fig.update_layout(xaxis=dict(showticklabels=False, showgrid=False),
-                          yaxis=dict(showgrid=False))
-        st.plotly_chart(fig_style(fig, bar_height(len(vc))), width="stretch")
+    # Quantity summary
+    st.markdown("")
+    ui.section("Quantity Reconciliation", "Expected vs received shipment volumes", 3)
+    e, f, g = st.columns(3)
+    kpi(e, fmt_num(asn_qty), "Expected Qty", INK)
+    kpi(f, fmt_num(rec_qty), "Received Qty", ACCENT)
+    variance = rec_qty - asn_qty
+    var_color = OK if abs(variance) < 1 else WARN
+    kpi(g, fmt_num(variance), "Variance", var_color,
+        f"{(variance/asn_qty*100):.1f}%" if asn_qty else "")
 
-    with c2:
-        st.markdown("###### Line match result")
-        if det.empty or det["MATCH STATUS"].astype(str).str.strip().eq("").all():
-            st.caption("Nothing reconciled yet.")
+    # Finalize summary report section with date range
+    st.markdown("---")
+    ui.section("Finalize Summary Report",
+               "Download pending, discrepancies and completed ASNs in one workbook", 4)
+    
+    # Date range selector
+    col1, col2, col3, col4 = st.columns([1.5, 1.5, 1, 1.5])
+    
+    with col1:
+        start_date = st.date_input(
+            "📅 From Date",
+            value=date.today().replace(day=1),
+            key="report_start_date",
+            help="Select the start date for the report"
+        )
+    
+    with col2:
+        end_date = st.date_input(
+            "📅 To Date",
+            value=date.today(),
+            key="report_end_date",
+            help="Select the end date for the report"
+        )
+    
+    with col3:
+        st.write("")
+        st.write("")
+        if st.button("🔄 Reset Dates", key="reset_dates", help="Reset to default date range"):
+            st.session_state.report_start_date = date.today().replace(day=1)
+            st.session_state.report_end_date = date.today()
+            st.rerun()
+    
+    with col4:
+        st.write("")
+        st.write("")
+        if start_date <= end_date:
+            report_data = finalize_bytes(start_date, end_date)
+            st.download_button(
+                "📥 Download Report",
+                report_data,
+                file_name=f"Finalize_Summary_{start_date:%Y%m%d}_{end_date:%Y%m%d}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary",
+                help="Download the summary report for the selected date range"
+            )
         else:
-            v = det["MATCH STATUS"].replace("", schema.M_PENDING) \
-                .value_counts().sort_values()
-            cmap = {schema.M_MATCHED: ACCENT, schema.M_MISSING: WARN,
-                    schema.M_PENDING: MUTED, schema.M_EXTRA: INFO}
-            fig = go.Figure(go.Bar(
-                x=v.values, y=v.index, orientation="h",
-                marker_color=[cmap.get(i, DANGER) for i in v.index],
-                text=v.values, textposition="outside", cliponaxis=False))
-            fig.update_layout(xaxis=dict(showticklabels=False, showgrid=False),
-                              yaxis=dict(showgrid=False))
-            st.plotly_chart(fig_style(fig, bar_height(len(v))), width="stretch")
-
-    c1, c2 = st.columns([3, 2])
-    with c1:
-        st.markdown("###### Quantity expected against received")
-        top = summ.copy()
-        top["_a"] = top["TOTAL QTY"].map(to_num)
-        top["_r"] = top["RECEIVED QTY"].map(to_num)
-        top = top.nlargest(12, "_a").sort_values("_a")
-        fig = go.Figure()
-        fig.add_bar(name="Expected", y=top["ASN NO"], x=top["_a"],
-                    orientation="h", marker_color="#cbd3dc")
-        fig.add_bar(name="Received", y=top["ASN NO"], x=top["_r"],
-                    orientation="h", marker_color=ACCENT)
-        fig.update_layout(barmode="group",
-                          yaxis=dict(showgrid=False),
-                          xaxis=dict(showgrid=True, gridcolor=LINE))
-        st.plotly_chart(fig_style(fig, bar_height(len(top), per=34, base=110),
-                                  legend=True), width="stretch")
-
-    with c2:
-        st.markdown("###### Discrepancies by type")
-        open_d = disc[disc["STATUS"] == schema.D_OPEN] if not disc.empty else disc
-        if open_d.empty:
-            st.success("No open discrepancies.")
-        else:
-            v = open_d["DISCREPANCY TYPE"].value_counts().sort_values()
-            fig = go.Figure(go.Bar(
-                x=v.values, y=v.index, orientation="h", marker_color=DANGER,
-                text=v.values, textposition="outside", cliponaxis=False))
-            fig.update_layout(xaxis=dict(showticklabels=False, showgrid=False),
-                              yaxis=dict(showgrid=False))
-            st.plotly_chart(fig_style(fig, bar_height(len(v))), width="stretch")
-
-    ui.section("Finalize summary report",
-               "Pending, discrepancies and completed ASNs in one workbook.")
-    c1, c2 = st.columns([1, 3])
-    c1.download_button(
-        "Download", finalize_bytes(),
-        file_name=f"Finalize_Summary_{date.today():%Y%m%d}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type="primary", width="stretch")
+            st.error("Start date must be before end date", icon="⚠️")
+    
+    # Status info
     holds = pipeline.open_pending()
-    c2.caption(f"{len(holds)} open hold(s) in the pending register"
-               + (" — see the Pending List page for the reasons."
-                  if len(holds) else "."))
+    st.info(f"ℹ️ {len(holds)} open hold(s) in the pending register" +
+            (" — review the Pending List page for details."
+             if len(holds) else " — all clear!"))
 
-    st.markdown("###### Needs action")
+    # Needs action section
+    st.markdown("---")
+    ui.section("Requires Action", "ASNs that are not yet fully complete", 5)
     need = summ[summ["OVERALL"] != schema.S_COMPLETE]
     if need.empty:
-        st.success("Every ASN is fully complete.")
+        st.success("✅ All ASNs are fully complete!", icon="✓")
     else:
+        st.warning(f"⚠️ {len(need)} ASN(s) require action", icon="!")
         show(pick(need, ["ASN NO", "TOTAL LINES", "MATCHED LINES", "MISSING LINES",
                    "MISMATCH LINES", "EXTRA LINES", "STATUS", "KORBER GRN",
                    "AX GRN", "LAST RECON"]), height=300)
-
-    st.caption(f"Received {fmt_num(rec_qty)} of {fmt_num(asn_qty)} expected · "
-               f"variance {fmt_num(rec_qty - asn_qty)}")
 
 
 # ═══════════════════════════════════════════════════════════════════

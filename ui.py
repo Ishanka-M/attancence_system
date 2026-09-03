@@ -99,22 +99,22 @@ def inject_css():
                font-variant-numeric:tabular-nums; }}
 
   /* ── page header ──────────────────────────────────────── */
-  .ph {{ margin:0 0 1.25rem 0; }}
-  .ph .row {{ display:flex; align-items:flex-start; gap:.7rem; }}
-  .ph .ic {{ font-size:1.28rem; line-height:1.5; }}
-  .ph .t {{ font-size:1.44rem; font-weight:660; color:{INK}; line-height:1.22; }}
-  .ph .s {{ font-size:.855rem; color:{MUTED}; margin-top:.22rem; max-width:78ch; }}
-  .ph .rule {{ height:1px; background:{LINE}; margin-top:.9rem; }}
+  .ph {{ margin:0 0 1.8rem 0; padding-bottom:.8rem; }}
+  .ph .row {{ display:flex; align-items:flex-start; gap:1rem; }}
+  .ph .ic {{ font-size:1.6rem; line-height:1.5; }}
+  .ph .t {{ font-size:1.75rem; font-weight:720; color:{INK}; line-height:1.25; letter-spacing:-.02em; }}
+  .ph .s {{ font-size:.92rem; color:{MUTED}; margin-top:.4rem; max-width:85ch; line-height:1.45; }}
+  .ph .rule {{ height:2px; background:linear-gradient(90deg, {ACCENT}, {ACCENT}00); margin-top:1rem; }}
 
   /* ── section heading ──────────────────────────────────── */
-  .sec {{ margin:1.5rem 0 .7rem 0; }}
-  .sec .t {{ font-size:.94rem; font-weight:640; color:{INK};
-             display:flex; align-items:center; gap:.45rem; }}
-  .sec .t .n {{ width:19px; height:19px; border-radius:5px; flex:none;
-                background:{ACCENT}14; color:{ACCENT}; font-size:.7rem;
+  .sec {{ margin:2rem 0 1rem 0; padding-left:.8rem; border-left:3px solid {ACCENT}; }}
+  .sec .t {{ font-size:1.02rem; font-weight:680; color:{INK};
+             display:flex; align-items:center; gap:.55rem; letter-spacing:-.01em; }}
+  .sec .t .n {{ width:24px; height:24px; border-radius:6px; flex:none;
+                background:{ACCENT}; color:#fff; font-size:.75rem;
                 font-weight:700; display:flex; align-items:center;
                 justify-content:center; }}
-  .sec .d {{ font-size:.8rem; color:{MUTED}; margin-top:.15rem; }}
+  .sec .d {{ font-size:.85rem; color:{MUTED}; margin-top:.25rem; line-height:1.4; }}
 
   /* ── stat cards ───────────────────────────────────────── */
   /* auto-fit keeps the cards on screen at any width instead of overflowing */
@@ -124,15 +124,16 @@ def inject_css():
   .g3 {{ grid-template-columns:repeat(auto-fit,minmax(210px,1fr)); }}
   .g4 {{ grid-template-columns:repeat(auto-fit,minmax(195px,1fr)); }}
   .g5 {{ grid-template-columns:repeat(auto-fit,minmax(175px,1fr)); }}
-  .stat {{ background:{SURFACE}; border:1px solid {LINE}; border-radius:11px;
-           padding:.85rem 1rem; position:relative; overflow:hidden;
-           transition:border-color .15s ease, box-shadow .15s ease; }}
-  .stat:hover {{ border-color:#d3d9e0; box-shadow:0 1px 3px rgba(15,23,32,.05); }}
-  .stat .edge {{ position:absolute; left:0; top:0; bottom:0; width:3px; }}
-  .stat .v {{ font-size:1.62rem; font-weight:660; line-height:1.12; color:{INK};
-              font-variant-numeric:tabular-nums; letter-spacing:-.02em; }}
-  .stat .l {{ font-size:.775rem; color:{MUTED}; margin-top:.24rem; }}
-  .stat .n {{ font-size:.715rem; color:{FAINT}; margin-top:.42rem; }}
+  .stat {{ background:{SURFACE}; border:1px solid {LINE}; border-radius:12px;
+           padding:1.15rem 1.25rem; position:relative; overflow:hidden;
+           transition:all .2s ease; box-shadow:0 1px 2px rgba(15,23,32,.04); }}
+  .stat:hover {{ border-color:{ACCENT}40; box-shadow:0 4px 12px rgba(13,110,99,.08); 
+                 transform:translateY(-2px); }}
+  .stat .edge {{ position:absolute; left:0; top:0; bottom:0; width:4px; border-radius:12px 0 0 12px; }}
+  .stat .v {{ font-size:1.85rem; font-weight:720; line-height:1.1; color:{INK};
+              font-variant-numeric:tabular-nums; letter-spacing:-.025em; }}
+  .stat .l {{ font-size:.82rem; color:{MUTED}; margin-top:.35rem; font-weight:550; }}
+  .stat .n {{ font-size:.765rem; color:{FAINT}; margin-top:.5rem; }}
 
   /* ── badges ───────────────────────────────────────────── */
   .bdg {{ display:inline-block; padding:.15rem .55rem; border-radius:6px;
@@ -141,19 +142,21 @@ def inject_css():
   .bdg + .bdg {{ margin-left:.3rem; }}
 
   /* ── pipeline strip ───────────────────────────────────── */
-  .pipe {{ display:flex; align-items:stretch; gap:.4rem; margin:.2rem 0 .5rem 0;
+  .pipe {{ display:flex; align-items:stretch; gap:.5rem; margin:.5rem 0 1rem 0;
            flex-wrap:wrap; }}
-  .pipe .seg {{ min-width:150px; }}
-  .pipe .seg {{ flex:1; background:{SURFACE}; border:1px solid {LINE};
-                border-radius:11px; padding:.75rem .9rem; position:relative; }}
-  .pipe .seg .n {{ font-size:1.35rem; font-weight:660; color:{INK};
+  .pipe .seg {{ min-width:160px; }}
+  .pipe .seg {{ flex:1; background:{SURFACE}; border:1.5px solid {LINE};
+                border-radius:12px; padding:1rem 1.1rem; position:relative;
+                transition:all .2s ease; }}
+  .pipe .seg:hover {{ border-color:{ACCENT}50; box-shadow:0 2px 8px rgba(13,110,99,.06); }}
+  .pipe .seg .n {{ font-size:1.52rem; font-weight:720; color:{INK};
                    font-variant-numeric:tabular-nums; line-height:1.1; }}
-  .pipe .seg .c {{ font-size:.755rem; color:{MUTED}; margin-top:.18rem; }}
-  .pipe .seg .bar {{ height:3px; border-radius:2px; margin-top:.6rem;
+  .pipe .seg .c {{ font-size:.8rem; color:{MUTED}; margin-top:.3rem; font-weight:550; }}
+  .pipe .seg .bar {{ height:4px; border-radius:2px; margin-top:.8rem;
                      background:{LINE_2}; overflow:hidden; }}
-  .pipe .seg .bar i {{ display:block; height:100%; border-radius:2px; }}
+  .pipe .seg .bar i {{ display:block; height:100%; border-radius:2px; transition:width .3s ease; }}
   .pipe .arrow {{ display:flex; align-items:center; color:{FAINT};
-                  font-size:.9rem; padding:0 .1rem; }}
+                  font-size:1.05rem; padding:0 .15rem; }}
   @media (max-width:1000px) {{ .pipe {{ flex-wrap:wrap; }} .pipe .arrow {{ display:none; }} }}
 
   /* ── stepper ──────────────────────────────────────────── */
