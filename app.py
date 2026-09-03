@@ -19,9 +19,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-import drive
 import gsheets
-import images
 import matching
 import parsing
 import pipeline
@@ -136,51 +134,6 @@ def cfg_recon() -> dict:
     }
 
 
-def attachment_block(asn: str, key_prefix: str, columns: int = 3):
-    """Preview and download every attachment belonging to one ASN."""
-    att = pipeline.attachments_for(asn)
-    if att.empty:
-        ui.empty("📎", "No attachments for this ASN",
-                 "Add photos or PDFs from the Attachments page, or upload them "
-                 "with the ASN document.")
-        return
-
-    cols = st.columns(columns)
-    for i, (_, r) in enumerate(att.iterrows()):
-        with cols[i % columns]:
-            is_pdf = (str(r.get("KIND", "")).upper() == "PDF"
-                      or str(r.get("MIME", "")).lower() == "application/pdf")
-            storage = str(r.get("STORAGE", "")).upper()
-            quality = str(r.get("QUALITY", "") or "original")
-            meta = f"{r.get('SIZE KB', '?')} KB · {quality} · {storage.lower()}"
-            ui.file_tile(r["FILE NAME"], "PDF" if is_pdf else "IMAGE", meta)
-
-            # Sheet-stored images are safe to preview inline; Drive originals
-            # are only fetched when the person actually asks for the file.
-            if not is_pdf and storage != "DRIVE":
-                prev = images.load_image(r["IMAGE ID"])
-                if prev:
-                    st.image(prev, width="stretch")
-
-            want = st.button("Download original", key=f"{key_prefix}_g_{r['IMAGE ID']}",
-                             width="stretch")
-            if want:
-                SS[f"dl_{r['IMAGE ID']}"] = images.load_bytes(r)
-
-            data = SS.get(f"dl_{r['IMAGE ID']}")
-            if data:
-                st.download_button(
-                    f"Save {r['FILE NAME']}", data, file_name=r["FILE NAME"],
-                    mime=r.get("MIME") or "application/octet-stream",
-                    key=f"{key_prefix}_d_{r['IMAGE ID']}", width="stretch")
-                st.caption(f"{round(len(data) / 1024, 1)} KB at full quality")
-            elif want:
-                st.warning("Could not retrieve the file.")
-
-            if r.get("LINK"):
-                st.markdown(f"[Open in Drive]({r['LINK']})")
-
-
 # ───────────────────────────── sidebar ─────────────────────────────
 ui.nav_brand("ASN / GRN Control", "Korber One · AX · EFL")
 
@@ -199,16 +152,9 @@ GROUPS = [
     ("Overview", ["Dashboard"]),
     ("Daily work", ["ASN Upload", "Inventory", "AX GRN"]),
     ("Review", ["Reconciliation", "ASN Register", "Pending List",
-                "Discrepancies", "Email", "Attachments", "Search"]),
+                "Discrepancies", "Email", "Search"]),
     ("Admin", ["Setup", "Data Manager", "Maintenance"]),
 ]
-ICONS = {
-    "Dashboard": "◧", "ASN Upload": "↑", "Inventory": "▤", "AX GRN": "✓",
-    "Reconciliation": "⇄", "ASN Register": "☰", "Pending List": "◔",
-    "Discrepancies": "!",
-    "Email": "✉", "Attachments": "◫", "Search": "⌕", "Setup": "⚙",
-    "Data Manager": "▦", "Maintenance": "⚑",
-}
 PAGES = [p for _, group in GROUPS for p in group]
 SS.setdefault("page", "Dashboard")
 
@@ -216,8 +162,7 @@ for label, group in GROUPS:
     ui.nav_label(label)
     for name in group:
         active = SS["page"] == name
-        if st.sidebar.button(f"{ICONS.get(name, '·')}   {name}",
-                             key=f"nav_{name}", width="stretch",
+        if st.sidebar.button(name, key=f"nav_{name}", width="stretch",
                              type="primary" if active else "secondary"):
             SS["page"] = name
             st.rerun()
@@ -247,8 +192,7 @@ if _new_tabs:
     st.sidebar.info("Created: " + ", ".join(_new_tabs))
 
 _expected = ["ASN_SUMMARY", "ASN_DETAIL", "INVENTORY", "DISCREPANCY", "AX_GRN",
-             "PENDING", "ASN_IMAGES", "IMAGE_DATA", "RECON_LOG", "EMAIL_LOG",
-             "USER-M", "SETTINGS"]
+             "PENDING", "RECON_LOG", "EMAIL_LOG", "USER-M", "SETTINGS"]
 _absent = [k for k in _expected if not gsheets.has_sheet(k)]
 if _absent:
     st.sidebar.error("schema.py is out of date — missing "
@@ -287,11 +231,10 @@ topbar_for(page)
 #  SETUP
 # ═══════════════════════════════════════════════════════════════════
 if page == "Setup":
-    hero("Setup", "Sheets, matching rules, automation, attachments and API limits",
-         "⚙")
+    hero("Setup", "Sheets, matching rules, automation and API limits", "⚙")
 
-    t_sheets, t_rules, t_auto, t_files, t_api = st.tabs(
-        ["Sheets", "Matching rules", "Automation", "Attachments", "API & quota"])
+    t_sheets, t_rules, t_auto, t_api = st.tabs(
+        ["Sheets", "Matching rules", "Automation", "API & quota"])
 
     with t_sheets:
         c1, c2 = st.columns([1, 2])
@@ -381,71 +324,6 @@ if page == "Setup":
                    "present in the uploaded file are left untouched. When a row "
                    "has no invoice number the pallet alone identifies it.")
 
-    with t_files:
-        ui.section("Where attachments are stored")
-        a, b = st.columns([1, 2])
-        s["IMAGE_STORAGE"] = a.selectbox(
-            "Storage", ["DRIVE", "SHEET"],
-            index=0 if str(s.get("IMAGE_STORAGE", "DRIVE")).upper() == "DRIVE" else 1,
-            help="DRIVE puts images and PDFs in the Drive folder below and falls "
-                 "back to the sheet if that fails.")
-        keep = b.checkbox(
-            "Keep images at original quality on Drive (no resizing)",
-            gsheets.setting_bool(s, "KEEP_ORIGINAL"),
-            help="Drive has room, so the file you uploaded is stored untouched "
-                 "and downloads come back identical. Turn this off only to save "
-                 "space.")
-        s["KEEP_ORIGINAL"] = "Y" if keep else "N"
-
-        ui.section("Compression",
-                   "Only applies when an image cannot be stored at full size — "
-                   "sheet fallback, or original quality turned off.")
-        a, b = st.columns(2)
-        s["IMAGE_MAX_PX"] = str(int(a.number_input(
-            "Max image px", value=gsheets.setting_float(s, "IMAGE_MAX_PX", 2200),
-            min_value=600.0, max_value=6000.0, step=200.0)))
-        s["IMAGE_QUALITY"] = str(int(b.number_input(
-            "JPEG quality", value=gsheets.setting_float(s, "IMAGE_QUALITY", 92),
-            min_value=40.0, max_value=95.0, step=1.0)))
-
-        s["DRIVE_FOLDER_ID"] = st.text_input(
-            "Drive folder — paste a link or an id", s.get("DRIVE_FOLDER_ID", ""))
-        fid = drive.folder_id(s["DRIVE_FOLDER_ID"])
-        if fid:
-            st.caption(f"Folder id: `{fid}`")
-
-        c1, c2 = st.columns([1, 3])
-        if c1.button("Save", type="primary", key="save_files"):
-            gsheets.save_settings(s)
-            st.success("Saved.")
-        if c2.button("Run Drive diagnostics"):
-            SS["drive_diag"] = drive.diagnose(s["DRIVE_FOLDER_ID"])
-
-        diag = SS.get("drive_diag")
-        if diag:
-            failed = next((d for d in diag if not d["ok"]), None)
-            for d in diag:
-                mark = "✅" if d["ok"] else "❌"
-                st.markdown(f"{mark} **{d['step']}**"
-                            + (f" — {d['detail']}" if d["detail"] else ""))
-            if failed:
-                ui.note(failed["detail"] or "See the failed step above.",
-                        f"Blocked at: {failed['step']}", "danger")
-            else:
-                ui.note("Images and PDFs will upload to this folder at full "
-                        "quality.", "Drive is ready", "ok")
-
-        st.markdown("---")
-        st.markdown("###### Service account")
-        st.code(drive.service_email() or "(not found in secrets)", language="text")
-        st.caption("Share the Drive folder with this address as an **Editor**. A "
-                   "service account has no storage quota of its own, so if uploads "
-                   "return a quota error move the folder into a Shared Drive or set "
-                   "Storage to SHEET. Either way an upload that fails falls back to "
-                   "the sheet, so nothing is lost.")
-        st.caption(f"Drive API: {'ready' if drive.available() else 'not installed'}"
-                   f" · PDF: {'ready' if parsing.pdf_available() else 'not installed'}")
-
     with t_api:
         st.markdown("###### Google API usage")
         st.caption("The Sheets API allows about 60 requests per minute. The app "
@@ -499,7 +377,7 @@ if page == "Setup":
 elif page == "ASN Upload":
     hero("ASN Upload",
          "Excel or PDF — choose the sheet or table, confirm, then save "
-         "summary, details and attachments", "↑")
+         "the summary and line details", "↑")
     ui.steps(["Upload files", "Choose the source", "Review", "Save"],
              4 if SS["parsed_asn"] else (2 if st.session_state.get("asn_up") else 1))
 
@@ -527,9 +405,9 @@ elif page == "ASN Upload":
                 c1.markdown(f"**{f.name}**")
                 c1.caption(f"PDF · {parsing.pdf_page_count(b)} page(s)")
                 if not tables:
-                    c2.error("No table found. This is probably a scanned PDF with "
-                             "no text layer — upload an Excel file instead, or "
-                             "attach this PDF from the Attachments page.")
+                    c2.error("No table found. This is probably a scanned PDF "
+                             "with no text layer — upload an Excel file "
+                             "instead.")
                     continue
                 labels = [t["label"] for t in tables]
                 sel = c2.selectbox(f"Table — {f.name}", labels, key=f"pt_{f.name}",
@@ -600,34 +478,9 @@ elif page == "ASN Upload":
                                       caption=f"{im['name']} ({im['size_kb']} KB)",
                                       width="stretch")
 
-        ui.section("Extra attachments",
-                   "Photos or PDFs that belong with this ASN.", 3)
-        extra_imgs = st.file_uploader(
-            "Photos or PDFs for this ASN — GRN sheet, damage, seal, "
-            "supplier documents",
-            type=["png", "jpg", "jpeg", "webp", "bmp", "pdf"],
-            accept_multiple_files=True, key="extra_img")
-        all_asn = sorted({clean(a) for p in SS["parsed_asn"].values()
-                          for a in p["df"].get("ASN_NO", []) if clean(a)})
-        img_asn = st.selectbox("Attach these files to", all_asn or ["—"],
-                               key="img_asn") if extra_imgs else None
-
-        ui.section("Save", "Writes the lines, the summary and every attachment.", 4)
-        mode = str(gsheets.settings_dict().get("IMAGE_STORAGE", "DRIVE")).upper()
-        c1, c2, c3 = st.columns([2, 1, 1])
-        targets = c1.multiselect("Save to", ["ASN_SUMMARY", "ASN_DETAIL"],
+        ui.section("Save", "Writes the ASN lines and the summary.", 3)
+        targets = st.multiselect("Save to", ["ASN_SUMMARY", "ASN_DETAIL"],
                                  default=["ASN_SUMMARY", "ASN_DETAIL"])
-        up_img = c2.checkbox("Save images", value=True)
-        keep_pdf = c3.checkbox("Attach the PDF", value=True,
-                               help="Stores the uploaded PDF itself against the ASN.")
-        if mode == "DRIVE":
-            ui.note("Images and PDFs go to the Drive folder at original quality. "
-                    "If Drive is unavailable they fall back to the sheet, "
-                    "compressed to fit.", "Attachment storage: Drive", "accent")
-        else:
-            ui.note("Attachments are stored inside the Google Sheet, so images "
-                    "are compressed to fit a cell. Switch to Drive in Setup for "
-                    "full quality.", "Attachment storage: Sheet", "warn")
 
         confirm = st.checkbox(
             f"Confirm — save {total_rows} line(s) to "
@@ -638,7 +491,7 @@ elif page == "ASN Upload":
                      disabled=not (confirm and targets and all_ok)):
             ts = now_str()
             user = SS["user"] or "unknown"
-            det_rows, img_rows = [], []
+            det_rows = []
 
             for fname, p in SS["parsed_asn"].items():
                 df, sheet = p["df"], p["sheet"]
@@ -671,75 +524,35 @@ elif page == "ASN Upload":
                         "AX GRN": schema.AX_NA, "REMARK": "",
                     })
 
-                file_asn = clean(df["ASN_NO"].iloc[0]) if len(df) else ""
-                if up_img:
-                    for im in p["images"]:
-                        img_rows.append((file_asn, im["name"],
-                                         "PDF EMBEDDED" if p.get("kind") == "pdf"
-                                         else "EXCEL EMBEDDED",
-                                         im["mime"], im["data"]))
-                if keep_pdf and p.get("kind") == "pdf" and p.get("raw"):
-                    img_rows.append((file_asn, fname, "ASN DOCUMENT",
-                                     "application/pdf", p["raw"]))
-
-            if extra_imgs and up_img and img_asn and img_asn != "—":
-                for uf in extra_imgs:
-                    d = uf.getvalue()
-                    ex_pdf = parsing.is_pdf(uf.name, d)
-                    img_rows.append((
-                        img_asn, uf.name,
-                        "SUPPORTING DOCUMENT" if ex_pdf else "MANUAL UPLOAD",
-                        "application/pdf" if ex_pdf else (uf.type or "image/png"),
-                        d))
-
             det = pd.DataFrame(det_rows).reindex(
                 columns=schema.ASN_DETAIL_HEADERS).fillna("")
 
             with st.spinner("Writing to the Google Sheet..."):
                 if "ASN_DETAIL" in targets and not det.empty:
                     a, u = gsheets.upsert("ASN_DETAIL", det.to_dict("records"))
-                    st.success(f"ASN_DETAIL — {a} added, {u} updated")
+                    st.success(f"ASN_DETAIL - {a} added, {u} updated")
 
                 if "ASN_SUMMARY" in targets and not det.empty:
                     summ = matching.summarise_asn(det)
-                    summ["AX GRN"] = schema.AX_NA
-                    summ["OVERALL"] = schema.S_GRN_PENDING
-                    summ["STATUS"] = schema.S_NEW
+                    # An ASN that has already been reconciled keeps its status;
+                    # only newly seen ASNs start at NEW, otherwise re-uploading
+                    # a document would reset a completed GRN back to the start.
+                    known = gsheets.get_df("ASN_SUMMARY")
+                    seen = set(known["ASN NO"].astype(str)) if not known.empty else set()
+                    fresh = ~summ["ASN NO"].astype(str).isin(seen)
+                    summ.loc[fresh, "AX GRN"] = schema.AX_NA
+                    summ.loc[fresh, "OVERALL"] = schema.S_GRN_PENDING
+                    summ.loc[fresh, "STATUS"] = schema.S_NEW
+                    for col in ("AX GRN", "OVERALL", "STATUS", "KORBER GRN"):
+                        summ.loc[~fresh, col] = ""      # blank leaves the sheet value
                     a, u = gsheets.upsert("ASN_SUMMARY", summ.to_dict("records"))
-                    st.success(f"ASN_SUMMARY — {a} added, {u} updated")
-
-                if img_rows:
-                    ok_n, errs = 0, []
-                    prog = st.progress(0.0, text="Saving attachments...")
-                    for i, (asn, nm, src, mime, data) in enumerate(img_rows):
-                        ok, msg = images.save_image(asn, nm, data, mime,
-                                                    source=src, user=user)
-                        if ok:
-                            ok_n += 1
-                            if msg and "failed" in msg.lower():
-                                errs.append(msg)
-                        else:
-                            errs.append(msg)
-                        prog.progress((i + 1) / len(img_rows),
-                                      text=f"Attachment {i + 1} of {len(img_rows)}")
-                    prog.empty()
-                    if ok_n:
-                        st.success(f"{ok_n} attachment(s) saved")
-                    if errs:
-                        fell_back = [e_ for e_ in errs if "Drive" in e_]
-                        if fell_back:
-                            ui.note(
-                                "Attachments were stored inside the Google "
-                                "Sheet instead, compressed to fit. Go to "
-                                "Setup - Attachments and run Drive "
-                                "diagnostics to fix the folder, then re-upload "
-                                "for full quality.",
-                                "Drive folder is not reachable", "warn")
-                        for e_ in errs[:4]:
-                            st.warning(e_)
+                    st.success(f"ASN_SUMMARY - {a} added, {u} updated")
+                    if (~fresh).any():
+                        st.caption(f"{int((~fresh).sum())} ASN(s) already existed - "
+                                   f"their GRN status was left untouched.")
 
             SS["parsed_asn"] = {}
-            st.info("Next: upload the Korber inventory — reconciliation runs "
+            st.info("Next: upload the Korber inventory - reconciliation runs "
                     "automatically from there.")
             st.balloons()
 
@@ -787,8 +600,12 @@ elif page == "Inventory":
                 with st.spinner("Merging inventory..."):
                     merge = pipeline.merge_inventory(df)
                 st.success(
-                    f"Inventory merged — {merge['replaced']} row(s) replaced, "
-                    f"{merge['added']} added, {merge['total']} in total.")
+                    f"Inventory merged - {merge['uploaded']} row(s) uploaded "
+                    f"across {merge['groups']} invoice/pallet group(s): "
+                    f"{merge['replaced']} existing row(s) replaced, "
+                    f"{merge['added']} row(s) new "
+                    f"({merge['new_groups']} new group(s)). "
+                    f"{merge['total']} rows held in total.")
 
                 if auto_recon:
                     with st.spinner("Reconciling..."):
@@ -1035,10 +852,6 @@ elif page == "ASN Register":
                 unsafe_allow_html=True)
     show(d2)
 
-    if pick != "All ASNs":
-        st.markdown("##### Attachments")
-        attachment_block(pick, "reg")
-
     st.download_button(
         "Download the register",
         reporting.build_excel({"Summary": v, "Details": d2}),
@@ -1051,14 +864,13 @@ elif page == "ASN Register":
                 st.caption("Admin only — sign in from the sidebar. Full options "
                            "are on the Maintenance page.")
             else:
-                st.caption("Removes the summary, details, discrepancies, AX GRN "
-                           "entry and attachments.")
+                st.caption("Removes the summary, details, discrepancies and "
+                           "the AX GRN entry.")
                 t = st.text_input("Type DELETE to confirm", key="reg_del")
                 if st.button("Delete", disabled=t.strip().upper() != "DELETE"):
                     res = {}
                     for k in ("ASN_SUMMARY", "ASN_DETAIL", "DISCREPANCY", "AX_GRN"):
                         res[k] = gsheets.delete_where(k, "ASN NO", [pick])
-                    res["ASN_IMAGES"] = images.delete_for_asn([pick])
                     st.success("Deleted — " +
                                ", ".join(f"{k}: {n}" for k, n in res.items()))
                     st.rerun()
@@ -1071,7 +883,7 @@ elif page == "Search":
     hero("Search", "Find any HU, ASN, item, lot, PO, GRN or vendor", "⌕")
 
     SEARCHABLE = ["ASN_DETAIL", "ASN_SUMMARY", "INVENTORY", "DISCREPANCY",
-                  "AX_GRN", "ASN_IMAGES", "RECON_LOG", "EMAIL_LOG"]
+                  "AX_GRN", "RECON_LOG", "EMAIL_LOG"]
 
     c1, c2 = st.columns([3, 2])
     term = c1.text_input("Search", placeholder="ETHT0726 · 26AUG_UPPD_40659 · GRN-40196",
@@ -1435,7 +1247,6 @@ elif page == "AX GRN":
 
     pend = ax[ax["AX GRN"] != schema.AX_DONE]
     done = ax[ax["AX GRN"] == schema.AX_DONE]
-    counts = pipeline.attachment_counts()
 
     a, b, c = st.columns(3)
     kpi(a, len(pend), "Awaiting AX GRN", INFO)
@@ -1448,20 +1259,12 @@ elif page == "AX GRN":
     else:
         remarks = pipeline.pending_remarks()
         view = pend.copy()
-        view["ATTACHMENTS"] = view["ASN NO"].astype(str).map(
-            lambda a_: counts.get(str(a_).strip(), 0))
         view["HOLD REASON"] = view["ASN NO"].astype(str).map(
             lambda a_: remarks.get(clean(a_), ""))
         show(pick(view, ["ASN NO", "CLIENT CODE", "KORBER GRN NO",
                          "KORBER GRN DATE", "TOTAL LINES", "TOTAL QTY",
-                         "OVERRIDE", "ATTACHMENTS", "HOLD REASON",
+                         "OVERRIDE", "HOLD REASON",
                          "OVERRIDE REASON", "REMARK", "PUSHED AT", "PUSHED BY"]))
-
-        ui.section("Documents for this ASN",
-                   "Download the ASN document or the photos at full original "
-                   "quality before posting the GRN into AX.")
-        doc_asn = st.selectbox("ASN", list(pend["ASN NO"].astype(str)), key="ax_doc")
-        attachment_block(doc_asn, "ax")
 
         ui.section("Mark as done in AX")
         c1, c2, c3 = st.columns([2, 1, 1])
@@ -1574,89 +1377,6 @@ elif page == "AX GRN":
         file_name=f"Finalize_Summary_{date.today():%Y%m%d}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         width="stretch")
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  ATTACHMENTS
-# ═══════════════════════════════════════════════════════════════════
-elif page == "Attachments":
-    hero("Attachments", "Photos and PDF documents held against each ASN", "◫")
-
-    meta = gsheets.get_df("ASN_IMAGES")
-    summ = gsheets.get_df("ASN_SUMMARY")
-    asn_opts = sorted({a for a in summ["ASN NO"] if a}) if not summ.empty else []
-    if not asn_opts and not meta.empty:
-        asn_opts = sorted({a for a in meta["ASN NO"] if a})
-
-    mode = str(gsheets.settings_dict().get("IMAGE_STORAGE", "DRIVE")).upper()
-    st.caption(f"Storage: **{mode}** — change it in Setup → Attachments.")
-
-    with st.expander("Add an attachment", expanded=meta.empty):
-        c1, c2 = st.columns([1, 2])
-        asn = c1.selectbox("ASN", asn_opts or ["—"])
-        note = c2.text_input("Note", "")
-        ups = st.file_uploader("Images or PDF",
-                               type=["png", "jpg", "jpeg", "webp", "bmp", "pdf"],
-                               accept_multiple_files=True, key="img_only")
-        if st.button("Upload", disabled=not ups or asn == "—", type="primary"):
-            ok_n, errs = 0, []
-            for uf in ups:
-                d = uf.getvalue()
-                is_pdf = parsing.is_pdf(uf.name, d)
-                ok, msg = images.save_image(
-                    asn, uf.name, d,
-                    "application/pdf" if is_pdf else (uf.type or "image/png"),
-                    source="ASN DOCUMENT" if is_pdf else "MANUAL UPLOAD",
-                    user=SS["user"] or "unknown", note=note)
-                if ok:
-                    ok_n += 1
-                    if msg and "failed" in msg.lower():
-                        errs.append(msg)
-                else:
-                    errs.append(msg)
-            if ok_n:
-                st.success(f"{ok_n} saved.")
-            if any("Drive" in e_ for e_ in errs):
-                ui.note("Saved to the Google Sheet instead. Run Drive "
-                        "diagnostics in Setup - Attachments to fix the folder.",
-                        "Drive folder is not reachable", "warn")
-            for e_ in errs[:4]:
-                st.warning(e_)
-            if ok_n:
-                st.rerun()
-
-    if meta.empty:
-        ui.empty("◫", "No attachments yet",
-                 "Attach photos or PDFs to an ASN using the panel above.")
-    else:
-        c1, c2 = st.columns([2, 1])
-        f = c1.selectbox("ASN filter", ["All ASNs"] +
-                         sorted({a for a in meta["ASN NO"] if a}))
-        kinds = sorted({k for k in meta["KIND"] if str(k).strip()}) or ["IMAGE"]
-        kf = c2.multiselect("Kind", kinds, default=kinds)
-
-        v = meta if f == "All ASNs" else meta[meta["ASN NO"] == f]
-        if kf:
-            v = v[v["KIND"].isin(kf) | (v["KIND"].astype(str).str.strip() == "")]
-
-        a, b, c = st.columns(3)
-        kpi(a, len(v), "Attachments")
-        kpi(b, v["ASN NO"].nunique(), "ASNs covered")
-        kpi(c, f'{fmt_num(v["SIZE KB"].map(to_num).sum())} KB', "Total size")
-
-        show(pick(v, ["IMAGE ID", "ASN NO", "FILE NAME", "KIND", "SOURCE", "SIZE KB",
-                "QUALITY", "STORAGE", "UPLOADED AT", "UPLOADED BY", "NOTE"]))
-
-        if f != "All ASNs":
-            st.markdown("##### Preview")
-            attachment_block(f, "att")
-
-        with st.expander("Delete"):
-            ids = st.multiselect("Attachment id", list(v["IMAGE ID"]))
-            if st.button("Delete", disabled=not ids):
-                n = images.delete_images(ids)
-                st.success(f"{n} deleted.")
-                st.rerun()
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1841,7 +1561,7 @@ elif page == "Maintenance":
 
     with t1:
         st.caption("Removes the summary, line details, discrepancies, AX GRN entry "
-                   "and attachments for the selected ASNs. This cannot be undone.")
+                   "for the selected ASNs. This cannot be undone.")
 
         summ = gsheets.get_df("ASN_SUMMARY")
         det = gsheets.get_df("ASN_DETAIL")
@@ -1860,9 +1580,6 @@ elif page == "Maintenance":
                     d = gsheets.get_df(k)
                     counts[k] = 0 if d.empty or col not in d.columns else int(
                         d[col].astype(str).str.strip().isin(sel).sum())
-                imeta = gsheets.get_df("ASN_IMAGES")
-                counts["ASN_IMAGES"] = 0 if imeta.empty else int(
-                    imeta["ASN NO"].astype(str).str.strip().isin(sel).sum())
 
                 st.markdown("###### What will be removed")
                 show(pd.DataFrame([{"Sheet": k, "Rows": v} for k, v in counts.items()]))
@@ -1884,15 +1601,12 @@ elif page == "Maintenance":
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
                 typed = st.text_input("Type DELETE to confirm", key="del_confirm")
-                also_img = st.checkbox("Delete attachments too", value=True)
 
                 if st.button("Delete", type="primary",
                              disabled=typed.strip().upper() != "DELETE"):
                     with st.spinner("Deleting..."):
                         res = {k: gsheets.delete_where(k, col, sel)
                                for k, col in ASN_SHEETS.items()}
-                        if also_img:
-                            res["ASN_IMAGES"] = images.delete_for_asn(sel)
                     st.success("Deleted — " +
                                ", ".join(f"{k}: {v}" for k, v in res.items()))
                     st.rerun()
@@ -1922,7 +1636,7 @@ elif page == "Maintenance":
                  "undone. Take a backup first.")
 
         DATA_SHEETS = ["ASN_SUMMARY", "ASN_DETAIL", "INVENTORY", "DISCREPANCY",
-                       "AX_GRN", "ASN_IMAGES", "IMAGE_DATA", "RECON_LOG",
+                       "AX_GRN", "PENDING", "RECON_LOG",
                        "EMAIL_LOG"]
         MASTERS = ["USER-M", "SETTINGS"]
 

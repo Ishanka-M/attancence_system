@@ -265,15 +265,18 @@ def inject_css():
 
   .navlabel {{ font-size:.66rem; font-weight:700; letter-spacing:.09em;
                text-transform:uppercase; color:#63727f;
-               padding:.7rem .3rem .22rem .3rem; margin:0; }}
+               padding:1.05rem .6rem .45rem .6rem; margin:0; line-height:1.2; }}
 
   /* nav rows are buttons so only one can ever look active */
   section[data-testid="stSidebar"] .stButton {{ margin:0; }}
+  /* every nav row shares one box model so the labels line up exactly,
+     whatever the active state */
   section[data-testid="stSidebar"] .stButton>button {{
       background:transparent; border:1px solid transparent; color:{NAV_TEXT};
       width:100%; justify-content:flex-start; text-align:left;
-      padding:.4rem .6rem; font-size:.855rem; font-weight:520;
-      border-radius:8px; }}
+      padding:.42rem .6rem; font-size:.855rem; font-weight:520;
+      line-height:1.35; min-height:2.1rem; border-radius:8px;
+      box-shadow:inset 2px 0 0 transparent; }}
   section[data-testid="stSidebar"] .stButton>button p {{
       color:inherit; font-size:.855rem; margin:0; text-align:left; }}
   /* the label sits in a nested flex box, so align that too or it centres */
@@ -285,7 +288,8 @@ def inject_css():
       background:{NAV_BG_2}; border-color:transparent; color:#fff; }}
   section[data-testid="stSidebar"] .stButton>button[kind="primary"] {{
       background:{ACCENT}26; border-color:transparent; color:#ffffff;
-      font-weight:640; box-shadow:inset 2px 0 0 {ACCENT_2}; }}
+      font-weight:640; box-shadow:inset 2px 0 0 {ACCENT_2};
+      padding:.42rem .6rem; }}
   section[data-testid="stSidebar"] .stButton>button[kind="primary"]:hover {{
       background:{ACCENT}33; color:#fff; }}
   section[data-testid="stSidebar"] div[data-testid="stExpander"] {{

@@ -6,7 +6,6 @@ Reads ASN and inventory files - Excel and PDF.
   * list_sheets()      -> sheet names in a workbook, for the user to pick
   * parse_asn()        -> ASN Excel sheet   -> canonical DataFrame
   * parse_inventory()  -> Korber inventory  -> canonical DataFrame
-  * extract_images()   -> images embedded in an xlsx
   * list_pdf_tables()  -> tables found in a PDF, best ASN match first
   * parse_asn_pdf()    -> selected PDF table -> canonical DataFrame
 
@@ -17,7 +16,6 @@ from __future__ import annotations
 
 import io
 import re
-import zipfile
 
 import pandas as pd
 
@@ -283,46 +281,6 @@ def parse_inventory(file_bytes: bytes, sheet_name) -> tuple[pd.DataFrame, dict]:
 
 
 # ═══════════════════════════════════════════════════════════════════
-#  Embedded images - an xlsx is a zip, images live under xl/media/
-# ═══════════════════════════════════════════════════════════════════
-_IMG_EXT = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-            ".gif": "image/gif", ".bmp": "image/bmp", ".webp": "image/webp",
-            ".tif": "image/tiff", ".tiff": "image/tiff", ".emf": "image/emf",
-            ".wmf": "image/wmf"}
-
-
-def extract_images(file_bytes: bytes) -> list[dict]:
-    """
-    Every image embedded in an .xlsx/.xlsm file. Handles both
-    'Insert > Picture' and 'Insert image in cell'.
-    """
-    out = []
-    try:
-        with zipfile.ZipFile(io.BytesIO(file_bytes)) as z:
-            for name in z.namelist():
-                low = name.lower()
-                if not (low.startswith("xl/media/") or "/media/" in low):
-                    continue
-                ext = "." + low.rsplit(".", 1)[-1] if "." in low else ""
-                if ext not in _IMG_EXT:
-                    continue
-                data = z.read(name)
-                if not data:
-                    continue
-                out.append({
-                    "name": name.split("/")[-1],
-                    "data": data,
-                    "mime": _IMG_EXT[ext],
-                    "size_kb": round(len(data) / 1024, 1),
-                })
-    except zipfile.BadZipFile:
-        pass                                   # older formats such as .xls
-    except Exception:
-        pass
-    return out
-
-
-# ═══════════════════════════════════════════════════════════════════
 #  PDF - for ASN documents that arrive as PDF
 # ═══════════════════════════════════════════════════════════════════
 def pdf_available() -> bool:
@@ -462,31 +420,6 @@ def parse_asn_pdf(file_bytes: bytes, table_keys: list[str] | None = None
     }
     return df, meta
 
-
-def extract_pdf_images(file_bytes: bytes, max_images: int = 20) -> list[dict]:
-    """Images embedded in the PDF, or an empty list."""
-    out = []
-    try:
-        from pypdf import PdfReader
-        reader = PdfReader(io.BytesIO(file_bytes))
-        for pi, page in enumerate(reader.pages, start=1):
-            for im in getattr(page, "images", []):
-                data = im.data
-                if not data or len(data) < 4096:      # skip icons and logos
-                    continue
-                nm = getattr(im, "name", f"p{pi}_img")
-                ext = "." + nm.rsplit(".", 1)[-1].lower() if "." in nm else ".png"
-                out.append({
-                    "name": f"p{pi}_{nm}",
-                    "data": data,
-                    "mime": _IMG_EXT.get(ext, "image/png"),
-                    "size_kb": round(len(data) / 1024, 1),
-                })
-                if len(out) >= max_images:
-                    return out
-    except Exception:
-        pass
-    return out
 
 
 def pdf_page_count(file_bytes: bytes) -> int:

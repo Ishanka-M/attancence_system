@@ -35,17 +35,16 @@ confirming, no button chasing.
 | Page | What it does |
 |------|--------------|
 | **Dashboard** | Pipeline strip, tally rate, open discrepancies, expected vs received quantity |
-| **ASN Upload** | Excel or PDF → choose the sheet or table → confirm → summary, details and attachments |
+| **ASN Upload** | Excel or PDF → choose the sheet or table → confirm → summary and line details |
 | **Inventory** | Upload the Korber inventory; the merge, reconciliation, AX push and email all follow automatically |
 | **Reconciliation** | Manual re-run for a chosen set of ASNs |
-| **ASN Register** | Summary and line details, per-ASN attachments, Excel export, delete |
+| **ASN Register** | Summary and line details, Excel export, delete |
 | **Search** | Find any HU, ASN, item, lot, PO, GRN or vendor across sheets |
 | **Discrepancies** | Summary and line level, severity, Excel export, manual close |
 | **Email** | Generate or reopen the Markdown discrepancy email |
-| **AX GRN** | Pending queue with attachment downloads, override push, then Mark AX GRN done |
+| **AX GRN** | Pending queue, override push, then Mark AX GRN done |
 | **Pending List** | Every GRN held at Korber or AX, with the reason, remark, priority and follow-up |
-| **Attachments** | Every photo and PDF, with preview, download and delete |
-| **Setup** | Sheets, matching rules, automation, attachments, API and quota |
+| **Setup** | Sheets, matching rules, automation, API and quota |
 | **Data Manager** | Edit any sheet directly (admin) |
 | **Maintenance** | Delete an ASN, clear a sheet, reset the database (admin) |
 
@@ -117,13 +116,31 @@ comparison (Setup → Matching rules).
 
 ---
 
+## Data flow fixes worth knowing
+
+* **Inventory merge replaces by group.** All existing rows for an Invoice
+  Number + Pallet in the upload are removed before the new rows are written,
+  so a pallet carrying several items or lots keeps every line. A row-for-row
+  swap used to drop the extras.
+* **Re-uploading an ASN document no longer resets its GRN status.** Only ASNs
+  the system has not seen before start at NEW; a reconciled or completed ASN
+  keeps its Korber and AX state, and the page says how many were left alone.
+* **A posted ASN is never re-queued.** ASNs already marked AX GRN done are
+  skipped by the automatic push and by the pending register.
+
+---
+
 ## Inventory merge
 
 Uploaded rows are keyed on **Invoice Number + Pallet**:
 
-* a row with a key that already exists is **replaced** with the new values;
-* a row with a new key is **added**;
-* rows not present in the uploaded file are **left alone**.
+* every existing row for an Invoice Number + Pallet in the upload is
+  **removed**, then all the uploaded rows for it are written;
+* pallets not mentioned in the upload are **left alone**.
+
+Replacing by group rather than row for row matters when one pallet carries
+several items or lots: a row-for-row swap would silently drop the extra
+lines.
 
 So a small correction file containing two pallets updates exactly those two
 pallets and leaves the other few hundred rows intact. When a row has no
@@ -148,49 +165,8 @@ ASN documents can arrive as PDF.
 * The picker shows entries like `Page 2 · Table 1 · 34×9 · ASN columns 9` —
   choose one and confirm, exactly as with an Excel worksheet.
 * Repeated header rows in multi-page tables are removed automatically.
-* Images embedded in the PDF are extracted, and the PDF itself is attached
-  to the ASN.
-* A scanned PDF with no text layer reports that clearly; attach it as a
-  document and load the data from Excel.
-
----
-
-## Attachments
-
-Images and PDFs are stored in the configured **Google Drive folder**.
-
-* Paste the folder **link** into Setup → Attachments; the id is extracted
-  for you.
-* Share the folder with the service account address shown on that page as an
-  **Editor**. Viewer access is not enough.
-* **Run Drive diagnostics** on that page checks each step in turn — library,
-  service account, folder id, folder visible, is a folder, editor rights, and
-  a real test upload that is deleted again — and names the first failure with
-  the fix. `HttpError 404` means the folder is not shared with the service
-  account; `403` means it is shared read-only, or the account has no storage
-  quota of its own.
-* **Drive keeps images at original quality.** Nothing is resized or
-  re-encoded, so a download returns the exact bytes that were uploaded. The
-  `QUALITY` column in `ASN_IMAGES` records this for every file.
-* Compression only happens when a file cannot be kept whole — the sheet
-  fallback, where a cell has a hard size limit. Those settings live under
-  Setup → Attachments → Compression (2200 px, quality 92 by default).
-* If Drive is unavailable the file falls back to the sheet itself — base64
-  chunks in `IMAGE_DATA`, metadata in `ASN_IMAGES` — so nothing is lost.
-* PDFs are never compressed, in either mode.
-
-> A Google service account has no Drive storage quota of its own. If uploads
-> return a quota error, move the folder into a **Shared Drive** or set
-> Storage to `SHEET`.
-
-Attachments can be downloaded from the ASN Register, the Attachments page,
-and directly from the AX GRN queue before posting into AX. **Download
-original** fetches the file back from Drive rather than serving a preview,
-so the AX GRN download is the full-resolution original.
-
-Photos *and* PDFs can be attached anywhere files are accepted, including the
-"Photos or PDFs for this ASN" uploader on the ASN Upload page — useful for
-GRN sheets, damage evidence, seal shots and supplier documents.
+* A scanned PDF with no text layer reports that clearly - load the data
+  from Excel in that case.
 
 ---
 
@@ -211,8 +187,7 @@ shows and controls:
 ## Sheets, created automatically
 
 `ASN_SUMMARY` · `ASN_DETAIL` · `INVENTORY` · `DISCREPANCY` · `AX_GRN` ·
-`ASN_IMAGES` · `IMAGE_DATA` · `RECON_LOG` · `EMAIL_LOG` · `USER-M` ·
-`SETTINGS`
+`PENDING` · `RECON_LOG` · `EMAIL_LOG` · `USER-M` · `SETTINGS`
 
 Missing tabs are created at start-up and again on first write, so a missing
 sheet never raises an error.
@@ -250,9 +225,7 @@ streamlit run app.py
 ### 4. First time through
 1. **Setup → Sheets** → create all sheets.
 2. **Setup → Matching rules** → set the client code, site and email addresses.
-3. **Setup → Attachments** → paste the Drive folder link, share the folder
-   with the service account, then run the connection test.
-4. **Setup → Automation** → confirm the three automatic steps are enabled.
+3. **Setup → Automation** → confirm the three automatic steps are enabled.
 
 ---
 
@@ -266,7 +239,5 @@ streamlit run app.py
 | `matching.py` | Reconciliation engine |
 | `parsing.py` | Excel and PDF parsing, alias mapping, image extraction |
 | `gsheets.py` | Sheets backend, auto-create, API manager |
-| `images.py` | Attachment compression, Drive and sheet storage |
-| `drive.py` | Drive upload and folder checks |
 | `reporting.py` | Excel reports and the Markdown email |
 | `schema.py` | Sheet definitions, status constants, default settings |

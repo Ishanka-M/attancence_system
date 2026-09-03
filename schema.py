@@ -110,7 +110,7 @@ ASN_SUMMARY_HEADERS = [
     "MATCHED QTY", "RECEIVED QTY", "QTY DIFF",
     "STATUS", "KORBER GRN", "KORBER GRN NO", "KORBER GRN DATE",
     "AX GRN", "AX GRN NO", "AX GRN DATE", "AX GRN BY",
-    "OVERALL", "LAST RECON", "IMAGES", "REMARK",
+    "OVERALL", "LAST RECON", "REMARK",
 ]
 
 ASN_DETAIL_HEADERS = [
@@ -154,14 +154,6 @@ PENDING_HEADERS = [
     "CLEARED AT", "CLEARED BY", "NOTE",
 ]
 
-ASN_IMAGES_HEADERS = [
-    "IMAGE ID", "ASN NO", "FILE NAME", "KIND", "SOURCE", "MIME", "SIZE KB",
-    "QUALITY", "STORAGE", "DRIVE FILE ID", "LINK", "UPLOADED AT",
-    "UPLOADED BY", "NOTE",
-]
-
-IMAGE_DATA_HEADERS = ["IMAGE ID", "SEQ", "CHUNK"]
-
 RECON_LOG_HEADERS = [
     "RUN ID", "RUN AT", "RUN BY", "ASN COUNT", "ASN LIST",
     "INVENTORY ROWS", "LINES CHECKED", "MATCHED", "MISSING",
@@ -189,12 +181,6 @@ DEFAULT_SETTINGS = [
     ["AUTO_RECON", "Y", "Reconcile automatically as soon as an inventory file is uploaded (Y/N)"],
     ["AUTO_PUSH_AX", "Y", "Move Korber GRN Done ASNs straight to AX GRN Pending (Y/N)"],
     ["AUTO_EMAIL", "Y", "Generate the mismatch email automatically after auto reconciliation (Y/N)"],
-    ["IMAGE_STORAGE", "DRIVE", "Where attachments are stored: DRIVE (falls back to SHEET) | SHEET"],
-    ["KEEP_ORIGINAL", "Y", "Upload images to Drive at original quality with no resizing (Y/N)"],
-    ["IMAGE_MAX_PX", "2200", "Maximum image edge in pixels, used only when an image must be compressed"],
-    ["IMAGE_QUALITY", "92", "JPEG quality used when an image must be compressed (40-95)"],
-    ["DRIVE_FOLDER_ID", "https://drive.google.com/drive/u/2/folders/14t0faZpeMAZIxMAV9q7fQB1ryN1Ps7mP",
-     "Drive folder for images and PDFs - paste a folder link or an ID"],
     ["API_RATE_LIMIT", "55", "Maximum Google API calls per minute (Google allows 60)"],
     ["CACHE_TTL", "90", "Sheet data cache lifetime in seconds"],
     ["EMAIL_TO", "", "Default To address for discrepancy emails"],
@@ -245,18 +231,6 @@ SHEETS: dict[str, dict] = {
         "kind": "data",
         "key": "PENDING ID",
         "headers": PENDING_HEADERS,
-    },
-    "ASN_IMAGES": {
-        "title": "ASN_IMAGES",
-        "kind": "data",
-        "key": "IMAGE ID",
-        "headers": ASN_IMAGES_HEADERS,
-    },
-    "IMAGE_DATA": {
-        "title": "IMAGE_DATA",
-        "kind": "data",
-        "key": None,
-        "headers": IMAGE_DATA_HEADERS,
     },
     "RECON_LOG": {
         "title": "RECON_LOG",

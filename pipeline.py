@@ -86,16 +86,45 @@ def merge_inventory(inv: pd.DataFrame, snapshot: str = "") -> dict:
     """
     Merge an uploaded inventory file into the INVENTORY sheet.
 
-    Rows that already exist for the same Invoice Number + Pallet are
-    replaced with the new values; everything else is appended. Nothing
-    that is not in the uploaded file is touched.
+    Every existing row for an Invoice Number + Pallet that appears in the
+    upload is removed, then all the uploaded rows are written. Replacing by
+    group rather than row matters when one pallet carries several items or
+    lots - a row-for-row swap would silently drop the extra lines. Anything
+    not present in the upload is left untouched.
     """
     rows = to_sheet_rows(inv, snapshot)
-    added, replaced = gsheets.upsert_by(
-        "INVENTORY", rows.to_dict("records"), INV_KEY, INV_KEY_FALLBACK)
-    total = len(gsheets.get_df("INVENTORY"))
+    if rows.empty:
+        return {"uploaded": 0, "added": 0, "replaced": 0, "groups": 0,
+                "new_groups": 0, "total": len(gsheets.get_df("INVENTORY"))}
+
+    def key_of(invoice, pallet) -> str:
+        i, p = str(invoice or "").strip().upper(), str(pallet or "").strip().upper()
+        return f"{i}|{p}" if i else p
+
+    keys = {key_of(r["INVOICE NUMBER"], r["PALLET"]) for _, r in rows.iterrows()}
+    keys.discard("")
+
+    cur = gsheets.get_df("INVENTORY")
+    replaced, prev_keys = 0, set()
+    if not cur.empty:
+        cur_keys = cur.apply(
+            lambda r: key_of(r.get("INVOICE NUMBER"), r.get("PALLET")), axis=1)
+        prev_keys = set(cur_keys)
+        hit = cur_keys.isin(keys)
+        replaced = int(hit.sum())
+        cur = cur[~hit]
+
+    up_keys = rows.apply(
+        lambda r: key_of(r["INVOICE NUMBER"], r["PALLET"]), axis=1)
+    added = int((~up_keys.isin(prev_keys)).sum())
+    new_groups = len(keys - prev_keys)
+
+    out = pd.concat([cur, rows.reindex(columns=schema.INVENTORY_HEADERS)],
+                    ignore_index=True)
+    gsheets.overwrite("INVENTORY", out)
+
     return {"uploaded": len(rows), "added": added, "replaced": replaced,
-            "total": total}
+            "groups": len(keys), "new_groups": new_groups, "total": len(out)}
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -192,6 +221,7 @@ def auto_reconcile(inv: pd.DataFrame, cfg: dict, user: str = "auto",
     ax_pushed = []
     if push_ax:
         ready = summ[summ["KORBER GRN"] == schema.K_DONE]
+        posted = _ax_completed()          # read once, not once per row
         ax_rows = [{
             "ASN NO": r["ASN NO"], "CLIENT CODE": r["CLIENT CODE"],
             "KORBER GRN NO": r["KORBER GRN NO"], "KORBER GRN DATE": ts,
@@ -200,8 +230,7 @@ def auto_reconcile(inv: pd.DataFrame, cfg: dict, user: str = "auto",
             "AX GRN": schema.AX_PENDING, "AX GRN NO": "", "AX GRN DATE": "",
             "AX GRN BY": "", "OVERALL": schema.S_AX_PENDING,
             "REMARK": "Auto-pushed on inventory upload",
-        } for _, r in ready.iterrows()
-            if str(r["ASN NO"]) not in _already_done_in_ax(r["ASN NO"])]
+        } for _, r in ready.iterrows() if str(r["ASN NO"]) not in posted]
         if ax_rows:
             gsheets.upsert("AX_GRN", ax_rows)
             ax_pushed = [r["ASN NO"] for r in ax_rows]
@@ -215,9 +244,10 @@ def auto_reconcile(inv: pd.DataFrame, cfg: dict, user: str = "auto",
         sm_iter = []
     else:
         sm_iter = list(sm.iterrows())
+    posted_ax = _ax_completed()
     for _, r in sm_iter:
         a = clean(r["ASN NO"])
-        if not a:
+        if not a or a in posted_ax:
             continue
         if str(r["KORBER GRN"]) == schema.K_DONE:
             clears.append(pending_id(a, schema.STAGE_KORBER))
@@ -265,8 +295,8 @@ def auto_reconcile(inv: pd.DataFrame, cfg: dict, user: str = "auto",
     return result
 
 
-def _already_done_in_ax(asn) -> set:
-    """ASNs already marked AX GRN Done should not be re-queued."""
+def _ax_completed() -> set:
+    """ASNs already posted in AX - they must not be re-queued as pending."""
     ax = gsheets.get_df("AX_GRN")
     if ax.empty:
         return set()
@@ -541,22 +571,3 @@ def push_to_ax(asns: list[str], user: str, reason: str, remark: str,
 
     sync_pending(opens, [], user or "unknown")
     return {"pushed": len(ax_rows), "asns": asns}
-
-
-# ═══════════════════════════════════════════════════════════════════
-#  attachments
-# ═══════════════════════════════════════════════════════════════════
-def attachments_for(asn: str) -> pd.DataFrame:
-    """Every image and PDF linked to one ASN."""
-    meta = gsheets.get_df("ASN_IMAGES")
-    if meta.empty:
-        return meta
-    return meta[meta["ASN NO"].astype(str).str.strip() == str(asn).strip()]
-
-
-def attachment_counts() -> dict[str, int]:
-    """ASN -> number of attachments, for badges in list views."""
-    meta = gsheets.get_df("ASN_IMAGES")
-    if meta.empty:
-        return {}
-    return meta.groupby(meta["ASN NO"].astype(str).str.strip()).size().to_dict()
