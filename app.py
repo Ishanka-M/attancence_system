@@ -303,33 +303,6 @@ st.markdown("""
     letter-spacing: 0.05em;
     font-weight: 550;
   }
-  
-  /* Header items in top nav */
-  .top-nav-header {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    align-items: center;
-    min-width: 80px;
-  }
-  
-  .top-nav-header-icon {
-    font-size: 1.1rem;
-  }
-  
-  .top-nav-header-label {
-    font-size: 0.68rem;
-    font-weight: 650;
-    color: #e8f0f8;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    text-align: center;
-  }
-  
-  .top-nav-header-sub {
-    font-size: 0.6rem;
-    color: #a3b8ca;
-  }
 </style>
 """, unsafe_allow_html=True)
 
@@ -358,26 +331,6 @@ nav_html += ''.join(group_html)
 nav_html += '''
 </div>
 <div class="top-nav-right">
-  <div class="top-nav-header">
-    <span class="top-nav-header-icon">👤</span>
-    <span class="top-nav-header-label">Operator</span>
-  </div>
-  
-  <div class="top-nav-header">
-    <span class="top-nav-header-icon">🔐</span>
-    <span class="top-nav-header-label">Admin</span>
-  </div>
-  
-  <div class="top-nav-header">
-    <span class="top-nav-header-icon">🔄</span>
-    <span class="top-nav-header-label">Data</span>
-  </div>
-  
-  <div class="top-nav-header">
-    <span class="top-nav-header-icon">ℹ️</span>
-    <span class="top-nav-header-label">Status</span>
-  </div>
-  
   <div class="top-nav-user-info">
     <div class="top-nav-user-name">''' + SS.get("user", "Guest") + '''</div>
     <div class="top-nav-user-role">''' + ("🔓 " + SS.get("role", "user").upper() if SS.get("user") else "Welcome") + '''</div>
@@ -387,6 +340,64 @@ nav_html += '''
 '''
 
 st.markdown(nav_html, unsafe_allow_html=True)
+
+# ── functional controls row (popovers, right under the top bar) ──
+st.markdown("""
+<style>
+  div[data-testid="stPopover"] > button {
+      background: transparent;
+      border: 1px solid #1e2937;
+      color: #e8f0f8 !important;
+      font-weight: 600;
+      font-size: 0.82rem;
+      padding: 0.4rem 0.9rem;
+      border-radius: 8px;
+  }
+  div[data-testid="stPopover"] > button:hover {
+      border-color: #0d6e63;
+      background: #16202d;
+  }
+  div[data-testid="stPopover"] > button p { color: inherit !important; }
+</style>
+""", unsafe_allow_html=True)
+
+pc1, pc2, pc3, pc4, pc_sp = st.columns([1.1, 1.1, 1, 1.2, 3])
+
+with pc1:
+    with st.popover("👤 Operator", use_container_width=True):
+        names = [n for n in _users["USER NAME"].astype(str) if n.strip()] \
+            if not _users.empty else []
+        who = st.selectbox("Select operator", ["Select"] + names + ["Add a name"],
+                           index=0, key="operator")
+        if who == "Add a name":
+            who = st.text_input("New name", value=SS.get("user", ""))
+        SS["user"] = "" if who == "Select" else who
+
+with pc2:
+    with st.popover("🔐 Admin Access", use_container_width=True):
+        pin = st.text_input("Admin PIN", type="password", key="pin_in")
+        if st.button("Verify", key="pin_btn", use_container_width=True):
+            _s = gsheets.settings_dict()
+            SS["role"] = "admin" if pin == str(_s.get("ADMIN_PIN", "1234")) else "user"
+            st.success("✅ Admin access granted") if SS["role"] == "admin" else st.error("❌ Wrong PIN")
+
+with pc3:
+    if st.button("🔄 Data", key="refresh_btn", use_container_width=True):
+        gsheets.refresh()
+        st.rerun()
+
+with pc4:
+    with st.popover("ℹ️ Status", use_container_width=True):
+        st.markdown(f"**Operator:** {SS['user'] or 'not set'}")
+        st.markdown(f"**Access:** {'admin' if SS['role'] == 'admin' else 'standard'}")
+        _st = gsheets.api_stats()
+        _bar = "red" if _st["last_minute"] > _st["limit"] * .8 else "green"
+        st.markdown(f"**API / min:** :{_bar}[{_st['last_minute']}/{_st['limit']}]")
+        _url = gsheets.spreadsheet_url()
+        if _url:
+            st.markdown(f"[Open Google Sheet]({_url})")
+        if _new_tabs:
+            st.info(f"✅ Created sheets: {', '.join(_new_tabs)}")
 
 # Navigation buttons in a clean horizontal layout
 nav_cols = st.columns(len(PAGES))
@@ -405,13 +416,8 @@ for idx, page_name in enumerate(PAGES):
 page = SS["page"]
 
 # ═══════════════════════════════════════════════════════════════════
-#  SESSION MANAGEMENT (Background)
+#  SCHEMA CHECK
 # ═══════════════════════════════════════════════════════════════════
-# Operator selection
-names = [n for n in _users["USER NAME"].astype(str) if n.strip()] \
-    if not _users.empty else []
-
-# Admin PIN verification & Data refresh handled via separate ui
 _expected = ["ASN_SUMMARY", "ASN_DETAIL", "INVENTORY", "DISCREPANCY", "AX_GRN",
              "PENDING", "RECON_LOG", "EMAIL_LOG", "USER-M", "SETTINGS"]
 _absent = [k for k in _expected if not gsheets.has_sheet(k)]
