@@ -325,26 +325,54 @@ def ensure_missing_once() -> list[str]:
 
 
 def sheet_status() -> pd.DataFrame:
+    """
+    One row per sheet: whether it exists, how many rows it holds, and any
+    schema columns it is still missing. Missing columns mean the sheet was
+    created before a schema change - rebuild it from Setup.
+    """
     sh = get_spreadsheet()
     existing = {ws.title: ws for ws in api(sh.worksheets)}
     out = []
     for key, cfg in schema.SHEETS.items():
         t = cfg["title"]
         ws = existing.get(t)
-        rows = 0
+        rows, missing = 0, []
         if ws:
             try:
-                rows = max(len(api(ws.get_all_values)) - 1, 0)
+                values = api(ws.get_all_values)
+                rows = max(len(values) - 1, 0)
+                header = [str(c).strip() for c in (values[0] if values else [])]
+                missing = [h for h in cfg["headers"] if h not in header]
             except Exception:
                 rows = 0
         out.append({
             "Sheet": t,
             "Type": cfg["kind"],
-            "Exists": "✅" if ws else "❌",
-            "Columns": len(cfg["headers"]),
+            "Exists": "yes" if ws else "no",
             "Data rows": rows,
+            "Columns": len(cfg["headers"]),
+            "Missing columns": ", ".join(missing) if missing else "-",
         })
     return pd.DataFrame(out)
+
+
+def missing_columns() -> dict[str, list[str]]:
+    """{sheet title: [columns the sheet does not have yet]} - cheap check."""
+    out = {}
+    try:
+        sh = get_spreadsheet()
+        existing = {ws.title: ws for ws in api(sh.worksheets)}
+        for key, cfg in schema.SHEETS.items():
+            ws = existing.get(cfg["title"])
+            if not ws:
+                continue
+            header = [str(c).strip() for c in api(ws.row_values, 1)]
+            gap = [h for h in cfg["headers"] if h not in header]
+            if gap:
+                out[cfg["title"]] = gap
+    except Exception:
+        pass
+    return out
 
 
 # ───────────────────────── read / write ─────────────────────────

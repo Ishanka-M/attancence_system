@@ -41,6 +41,19 @@ def fig_style(fig, height=300, legend=False):
     return ui.chart(fig, height, legend)
 
 
+def pick(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
+    """
+    Select only the columns that actually exist.
+
+    A sheet created before a schema change is missing the newer columns
+    until Setup rebuilds it, and a hard-coded selection would raise
+    KeyError. Skipping the absent ones keeps the page usable either way.
+    """
+    if df is None or df.empty:
+        return df
+    return df[[c for c in cols if c in df.columns]]
+
+
 def show(df: pd.DataFrame, height: int | None = None, n: int = 3000,
          empty_msg: str = "Nothing to show yet."):
     if df is None or df.empty:
@@ -265,7 +278,17 @@ if page == "Setup":
         with c2:
             st.caption("Every tab is created automatically, including on first "
                        "write, so a missing sheet never causes an error.")
-        show(gsheets.sheet_status())
+        status = gsheets.sheet_status()
+        gaps = status[status["Missing columns"] != "-"]
+        if not gaps.empty:
+            ui.note(
+                "These sheets were created before the current version and are "
+                "missing columns: "
+                + "; ".join(f"{r['Sheet']} ({r['Missing columns']})"
+                            for _, r in gaps.iterrows())
+                + ". Use the button above to add them — existing data is kept.",
+                "Schema out of date", "warn")
+        show(status)
 
     s = gsheets.settings_dict()
 
@@ -762,18 +785,18 @@ elif page == "Inventory":
                 "INV QTY", "QTY DIFF", "MATCH STATUS", "INV GRN NO", "DISCREPANCY"]
         det, stc = R["detail"], R["detail"]["MATCH STATUS"].astype(str)
         with tabs[0]:
-            show(R["summary"][["ASN NO", "TOTAL LINES", "TOTAL QTY", "MATCHED LINES",
+            show(pick(R["summary"], ["ASN NO", "TOTAL LINES", "TOTAL QTY", "MATCHED LINES",
                                "MISSING LINES", "MISMATCH LINES", "EXTRA LINES",
-                               "RECEIVED QTY", "QTY DIFF", "STATUS", "KORBER GRN"]])
+                               "RECEIVED QTY", "QTY DIFF", "STATUS", "KORBER GRN"]))
         with tabs[1]:
-            mm = det[~stc.isin([schema.M_MATCHED, schema.M_MISSING])][cols]
+            mm = pick(det[~stc.isin([schema.M_MATCHED, schema.M_MISSING])], cols)
             if not R["extra"].empty:
-                mm = pd.concat([mm, R["extra"][cols]], ignore_index=True)
+                mm = pd.concat([mm, pick(R["extra"], cols)], ignore_index=True)
             show(mm)
         with tabs[2]:
-            show(det[stc == schema.M_MISSING][cols])
+            show(pick(det[stc == schema.M_MISSING], cols))
         with tabs[3]:
-            show(det[stc == schema.M_MATCHED][cols])
+            show(pick(det[stc == schema.M_MATCHED], cols))
 
         if R.get("email"):
             st.markdown("##### Mismatch email")
@@ -886,20 +909,20 @@ elif page == "Reconciliation":
         tabs = st.tabs(["Tallied", "Missing", "Mismatched", "Extra", "All",
                         "ASN summary"])
         with tabs[0]:
-            show(det[stc == schema.M_MATCHED][cols])
+            show(pick(det[stc == schema.M_MATCHED], cols))
         with tabs[1]:
-            show(det[stc == schema.M_MISSING][cols])
+            show(pick(det[stc == schema.M_MISSING], cols))
         with tabs[2]:
-            show(det[~stc.isin([schema.M_MATCHED, schema.M_MISSING])][cols])
+            show(pick(det[~stc.isin([schema.M_MATCHED, schema.M_MISSING])], cols))
         with tabs[3]:
-            show(R["extra"][cols] if not R["extra"].empty else R["extra"])
+            show(pick(R["extra"], cols) if not R["extra"].empty else R["extra"])
         with tabs[4]:
-            show(det[cols])
+            show(pick(det, cols))
         with tabs[5]:
-            show(R["summary"][["ASN NO", "TOTAL LINES", "TOTAL QTY", "MATCHED LINES",
+            show(pick(R["summary"], ["ASN NO", "TOTAL LINES", "TOTAL QTY", "MATCHED LINES",
                                "MISSING LINES", "MISMATCH LINES", "EXTRA LINES",
                                "RECEIVED QTY", "QTY DIFF", "STATUS", "KORBER GRN",
-                               "KORBER GRN NO"]])
+                               "KORBER GRN NO"]))
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -1124,11 +1147,11 @@ elif page == "Discrepancies":
     dcols = ["ASN NO", "ASN LINE", "HU ID", "ITEM NUMBER", "LOT NUMBER", "ASN QTY",
              "INV QTY", "QTY DIFF", "DISCREPANCY TYPE", "SEVERITY", "DETAIL",
              "STATUS", "GENERATED AT", "RUN ID"]
-    show(v[dcols])
+    show(pick(v, dcols))
 
     st.download_button(
         "Download the discrepancy report",
-        reporting.build_excel({"Summary": g, "Details": v[dcols]}),
+        reporting.build_excel({"Summary": g, "Details": pick(v, dcols)}),
         file_name=f"Discrepancy_{date.today():%Y%m%d}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         type="primary")
@@ -1163,8 +1186,8 @@ elif page == "Email":
     log = gsheets.get_df("EMAIL_LOG")
     if not log.empty:
         with st.expander(f"Previously generated emails ({len(log)})"):
-            show(log[["EMAIL ID", "GENERATED AT", "GENERATED BY", "ASN LIST",
-                      "SUBJECT"]])
+            show(pick(log, ["EMAIL ID", "GENERATED AT", "GENERATED BY", "ASN LIST",
+                      "SUBJECT"]))
             pick_id = st.selectbox("Reopen", ["None"] + list(log["EMAIL ID"]))
             if pick_id != "None":
                 row = log[log["EMAIL ID"] == pick_id].iloc[0]
@@ -1257,9 +1280,9 @@ elif page == "AX GRN":
         view = pend.copy()
         view["ATTACHMENTS"] = view["ASN NO"].astype(str).map(
             lambda a_: counts.get(str(a_).strip(), 0))
-        show(view[["ASN NO", "CLIENT CODE", "KORBER GRN NO", "KORBER GRN DATE",
+        show(pick(view, ["ASN NO", "CLIENT CODE", "KORBER GRN NO", "KORBER GRN DATE",
                    "TOTAL LINES", "TOTAL QTY", "ATTACHMENTS", "PUSHED AT",
-                   "PUSHED BY", "REMARK"]])
+                   "PUSHED BY", "REMARK"]))
 
         ui.section("Documents for this ASN",
                    "Download the ASN document or the photos at full original "
@@ -1376,8 +1399,8 @@ elif page == "Attachments":
         kpi(b, v["ASN NO"].nunique(), "ASNs covered")
         kpi(c, f'{fmt_num(v["SIZE KB"].map(to_num).sum())} KB', "Total size")
 
-        show(v[["IMAGE ID", "ASN NO", "FILE NAME", "KIND", "SOURCE", "SIZE KB",
-                "QUALITY", "STORAGE", "UPLOADED AT", "UPLOADED BY", "NOTE"]])
+        show(pick(v, ["IMAGE ID", "ASN NO", "FILE NAME", "KIND", "SOURCE", "SIZE KB",
+                "QUALITY", "STORAGE", "UPLOADED AT", "UPLOADED BY", "NOTE"]))
 
         if f != "All ASNs":
             st.markdown("##### Preview")
@@ -1504,9 +1527,9 @@ elif page == "Dashboard":
     if need.empty:
         st.success("Every ASN is fully complete.")
     else:
-        show(need[["ASN NO", "TOTAL LINES", "MATCHED LINES", "MISSING LINES",
+        show(pick(need, ["ASN NO", "TOTAL LINES", "MATCHED LINES", "MISSING LINES",
                    "MISMATCH LINES", "EXTRA LINES", "STATUS", "KORBER GRN",
-                   "AX GRN", "LAST RECON"]], height=300)
+                   "AX GRN", "LAST RECON"]), height=300)
 
     st.caption(f"Received {fmt_num(rec_qty)} of {fmt_num(asn_qty)} expected · "
                f"variance {fmt_num(rec_qty - asn_qty)}")
@@ -1588,8 +1611,9 @@ elif page == "Maintenance":
                 prev = det[det["ASN NO"].astype(str).isin(sel)] \
                     if not det.empty else pd.DataFrame()
                 with st.expander(f"Lines to be deleted ({len(prev)})"):
-                    show(prev[["ASN NO", "ASN LINE", "HU ID", "ITEM NUMBER", "QTY",
-                               "MATCH STATUS", "KORBER GRN", "AX GRN"]]
+                    show(pick(prev, ["ASN NO", "ASN LINE", "HU ID",
+                                     "ITEM NUMBER", "QTY", "MATCH STATUS",
+                                     "KORBER GRN", "AX GRN"])
                          if not prev.empty else prev)
 
                 st.download_button(

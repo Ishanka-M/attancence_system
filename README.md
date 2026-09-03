@@ -164,8 +164,11 @@ shows and controls:
 `SETTINGS`
 
 Missing tabs are created at start-up and again on first write, so a missing
-sheet never raises an error. New schema columns are appended to existing
-sheets without losing data.
+sheet never raises an error.
+
+When a new version adds a column, existing sheets keep working: pages only
+read the columns that are actually present, and **Setup → Sheets** flags
+which sheets are behind and adds the new headers without touching the data.
 
 ---
 
