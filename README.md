@@ -115,9 +115,15 @@ ASN documents can arrive as PDF.
 Images and PDFs are stored in the configured **Google Drive folder**.
 
 * Paste the folder **link** into Setup → Attachments; the id is extracted
-  for you. Use **Test the Drive connection** to confirm access.
+  for you.
 * Share the folder with the service account address shown on that page as an
-  **Editor**.
+  **Editor**. Viewer access is not enough.
+* **Run Drive diagnostics** on that page checks each step in turn — library,
+  service account, folder id, folder visible, is a folder, editor rights, and
+  a real test upload that is deleted again — and names the first failure with
+  the fix. `HttpError 404` means the folder is not shared with the service
+  account; `403` means it is shared read-only, or the account has no storage
+  quota of its own.
 * **Drive keeps images at original quality.** Nothing is resized or
   re-encoded, so a download returns the exact bytes that were uploaded. The
   `QUALITY` column in `ASN_IMAGES` records this for every file.

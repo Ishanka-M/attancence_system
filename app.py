@@ -101,6 +101,7 @@ SS.setdefault("auto", None)          # last automatic reconciliation result
 SS.setdefault("recon", None)         # last manual reconciliation result
 SS.setdefault("email", None)
 SS.setdefault("backup", None)
+SS.setdefault("drive_diag", None)
 
 
 def cfg_recon() -> dict:
@@ -388,9 +389,22 @@ if page == "Setup":
         if c1.button("Save", type="primary", key="save_files"):
             gsheets.save_settings(s)
             st.success("Saved.")
-        if c2.button("Test the Drive connection"):
-            ok, msg = drive.check_folder(s["DRIVE_FOLDER_ID"])
-            st.success(msg) if ok else st.error(msg)
+        if c2.button("Run Drive diagnostics"):
+            SS["drive_diag"] = drive.diagnose(s["DRIVE_FOLDER_ID"])
+
+        diag = SS.get("drive_diag")
+        if diag:
+            failed = next((d for d in diag if not d["ok"]), None)
+            for d in diag:
+                mark = "✅" if d["ok"] else "❌"
+                st.markdown(f"{mark} **{d['step']}**"
+                            + (f" — {d['detail']}" if d["detail"] else ""))
+            if failed:
+                ui.note(failed["detail"] or "See the failed step above.",
+                        f"Blocked at: {failed['step']}", "danger")
+            else:
+                ui.note("Images and PDFs will upload to this folder at full "
+                        "quality.", "Drive is ready", "ok")
 
         st.markdown("---")
         st.markdown("###### Service account")
@@ -682,8 +696,18 @@ elif page == "ASN Upload":
                     prog.empty()
                     if ok_n:
                         st.success(f"{ok_n} attachment(s) saved")
-                    for e_ in errs[:6]:
-                        st.warning(e_)
+                    if errs:
+                        fell_back = [e_ for e_ in errs if "Drive" in e_]
+                        if fell_back:
+                            ui.note(
+                                "Attachments were stored inside the Google "
+                                "Sheet instead, compressed to fit. Go to "
+                                "Setup - Attachments and run Drive "
+                                "diagnostics to fix the folder, then re-upload "
+                                "for full quality.",
+                                "Drive folder is not reachable", "warn")
+                        for e_ in errs[:4]:
+                            st.warning(e_)
 
             SS["parsed_asn"] = {}
             st.info("Next: upload the Korber inventory — reconciliation runs "
@@ -1375,7 +1399,11 @@ elif page == "Attachments":
                     errs.append(msg)
             if ok_n:
                 st.success(f"{ok_n} saved.")
-            for e_ in errs:
+            if any("Drive" in e_ for e_ in errs):
+                ui.note("Saved to the Google Sheet instead. Run Drive "
+                        "diagnostics in Setup - Attachments to fix the folder.",
+                        "Drive folder is not reachable", "warn")
+            for e_ in errs[:4]:
                 st.warning(e_)
             if ok_n:
                 st.rerun()
