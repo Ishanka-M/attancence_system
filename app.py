@@ -59,20 +59,17 @@ def finalize_bytes(start_date=None, end_date=None) -> bytes:
                 summ[date_col] = pd.to_datetime(summ[date_col], errors='coerce')
                 mask = (summ[date_col].dt.date >= start_date) & (summ[date_col].dt.date <= end_date)
                 summ = summ[mask]
-                
-                # Filter detail by ASN numbers in filtered summary
-                if not summ.empty and "ASN NO" in det.columns and "ASN NO" in summ.columns:
-                    asn_nos = set(summ["ASN NO"].dropna())
+
+                # Filter detail/discrepancy/AX GRN to the same ASN set as the
+                # filtered summary — including when that set is now empty, so
+                # the workbook's sheets stay consistent with each other
+                # instead of the detail tabs silently keeping unrelated rows.
+                asn_nos = set(summ["ASN NO"].dropna()) if "ASN NO" in summ.columns else set()
+                if "ASN NO" in det.columns:
                     det = det[det["ASN NO"].isin(asn_nos)]
-                
-                # Filter discrepancies by ASN
-                if not summ.empty and "ASN NO" in disc.columns and "ASN NO" in summ.columns:
-                    asn_nos = set(summ["ASN NO"].dropna())
+                if "ASN NO" in disc.columns:
                     disc = disc[disc["ASN NO"].isin(asn_nos)]
-                
-                # Filter AX GRN by ASN
-                if not summ.empty and "ASN NO" in ax.columns and "ASN NO" in summ.columns:
-                    asn_nos = set(summ["ASN NO"].dropna())
+                if "ASN NO" in ax.columns:
                     ax = ax[ax["ASN NO"].isin(asn_nos)]
             except Exception:
                 pass  # If date filtering fails, use all data
@@ -192,117 +189,117 @@ SS.setdefault("page", "Dashboard")
 # ═══════════════════════════════════════════════════════════════════
 #  TOP NAVIGATION BAR
 # ═══════════════════════════════════════════════════════════════════
-st.markdown("""
+st.markdown(f"""
 <style>
-  .top-nav-container {
-    background: linear-gradient(90deg, #0e1621 0%, #16202d 100%);
-    border-bottom: 2px solid #0d6e63;
+  .top-nav-container {{
+    background: linear-gradient(90deg, {ui.BG} 0%, {ui.SURFACE} 100%);
+    border-bottom: 2px solid {ACCENT};
     padding: 0.8rem 1.2rem;
     margin: -1rem -1rem 1.5rem -1rem;
     display: flex;
     align-items: center;
     gap: 1rem;
     flex-wrap: wrap;
-  }
+  }}
   
-  .top-nav-brand {
+  .top-nav-brand {{
     display: flex;
     align-items: center;
     gap: 0.6rem;
     padding-right: 1.5rem;
-    border-right: 1px solid #1e2937;
+    border-right: 1px solid {ui.LINE};
     min-width: 200px;
-  }
+  }}
   
-  .top-nav-brand-mark {
+  .top-nav-brand-mark {{
     width: 32px;
     height: 32px;
     border-radius: 8px;
-    background: linear-gradient(135deg, #0d6e63, #0f8578);
-    color: #fff;
+    background: linear-gradient(135deg, {ACCENT}, {ui.ACCENT_2});
+    color: #04211d;
     font-size: 0.9rem;
-    font-weight: 700;
+    font-weight: 800;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-  }
+  }}
   
-  .top-nav-brand-text {
+  .top-nav-brand-text {{
     display: flex;
     flex-direction: column;
     gap: 0.15rem;
-  }
+  }}
   
-  .top-nav-brand-name {
-    color: #fff;
+  .top-nav-brand-name {{
+    color: {INK};
     font-size: 0.95rem;
     font-weight: 680;
     line-height: 1.2;
-  }
+  }}
   
-  .top-nav-brand-sub {
-    color: #9db3c4;
+  .top-nav-brand-sub {{
+    color: {MUTED};
     font-size: 0.7rem;
     line-height: 1;
-  }
+  }}
   
-  .top-nav-menu {
+  .top-nav-menu {{
     display: flex;
     gap: 0.2rem;
     flex: 1;
     flex-wrap: wrap;
     align-items: center;
-  }
+  }}
   
-  .top-nav-group {
+  .top-nav-group {{
     display: flex;
     gap: 0.1rem;
     align-items: center;
-  }
+  }}
   
-  .top-nav-group-label {
-    font-size: 0.64rem;
-    font-weight: 720;
-    color: #8fa1b0;
+  .top-nav-group-label {{
+    font-size: 0.68rem;
+    font-weight: 750;
+    color: {ui.INK_2};
     text-transform: uppercase;
     padding: 0 0.5rem;
     margin-right: 0.3rem;
     letter-spacing: 0.07em;
-  }
+  }}
   
-  .top-nav-right {
+  .top-nav-right {{
     display: flex;
     gap: 1.2rem;
     margin-left: auto;
     align-items: center;
     padding-left: 1.2rem;
-    border-left: 1px solid #1e2937;
+    border-left: 1px solid {ui.LINE};
     flex-wrap: wrap;
     min-width: auto;
-  }
+  }}
   
-  .top-nav-user-info {
+  .top-nav-user-info {{
     display: flex;
     flex-direction: column;
     gap: 0.2rem;
     text-align: right;
-  }
+  }}
   
-  .top-nav-user-name {
-    color: #e8f0f8;
-    font-size: 0.82rem;
-    font-weight: 600;
+  .top-nav-user-name {{
+    color: {INK};
+    font-size: 0.85rem;
+    font-weight: 650;
     line-height: 1.2;
-  }
+  }}
   
-  .top-nav-user-role {
-    color: #a3b8ca;
+  .top-nav-user-role {{
+    color: {ACCENT};
     font-size: 0.68rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    font-weight: 550;
-  }
+    font-weight: 650;
+  }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -342,22 +339,23 @@ nav_html += '''
 st.markdown(nav_html, unsafe_allow_html=True)
 
 # ── functional controls row (popovers, right under the top bar) ──
-st.markdown("""
+st.markdown(f"""
 <style>
-  div[data-testid="stPopover"] > button {
-      background: transparent;
-      border: 1px solid #1e2937;
-      color: #e8f0f8 !important;
-      font-weight: 600;
+  div[data-testid="stPopover"] > button {{
+      background: {ui.SURFACE};
+      border: 1px solid {ui.LINE};
+      color: {INK} !important;
+      font-weight: 620;
       font-size: 0.82rem;
       padding: 0.4rem 0.9rem;
       border-radius: 8px;
-  }
-  div[data-testid="stPopover"] > button:hover {
-      border-color: #0d6e63;
-      background: #16202d;
-  }
-  div[data-testid="stPopover"] > button p { color: inherit !important; }
+  }}
+  div[data-testid="stPopover"] > button:hover {{
+      border-color: {ACCENT};
+      background: {ui.SURFACE_2};
+      color: {ACCENT} !important;
+  }}
+  div[data-testid="stPopover"] > button p {{ color: inherit !important; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -1741,75 +1739,75 @@ elif page == "Dashboard":
 
     # Bottom quick stats section
     st.markdown("---")
-    st.markdown("""
+    st.markdown(f"""
     <style>
-      .bottom-stats {
+      .bottom-stats {{
         display: flex;
         gap: 1rem;
         flex-wrap: wrap;
         margin-top: 1.5rem;
         padding: 1.5rem 0;
-      }
+      }}
       
-      .stat-pill {
+      .stat-pill {{
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
         padding: 1.2rem 1.8rem;
-        background: linear-gradient(135deg, #0e1621 0%, #16202d 100%);
-        border: 1px solid #1e2937;
+        background: {ui.SURFACE};
+        border: 1px solid {ui.LINE};
         border-radius: 10px;
         min-width: 140px;
         transition: all 0.3s ease;
         cursor: default;
-      }
+      }}
       
-      .stat-pill:hover {
-        border-color: #0d6e63;
-        box-shadow: 0 4px 12px rgba(13, 110, 99, 0.15);
+      .stat-pill:hover {{
+        border-color: {ACCENT};
+        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
         transform: translateY(-2px);
-      }
+      }}
       
-      .stat-pill-value {
+      .stat-pill-value {{
         font-size: 1.8rem;
         font-weight: 720;
-        color: #0d6e63;
+        color: {ACCENT};
         line-height: 1;
-      }
+      }}
       
-      .stat-pill-label {
+      .stat-pill-label {{
         font-size: 0.8rem;
-        color: #7d8b9a;
+        color: {MUTED};
         margin-top: 0.5rem;
         text-transform: uppercase;
         letter-spacing: 0.05em;
         font-weight: 600;
-      }
+      }}
       
-      .stat-pill.pending {
-        border-left: 3px solid #f59e0b;
-      }
+      .stat-pill.pending {{
+        border-left: 3px solid {WARN};
+      }}
       
-      .stat-pill.pending .stat-pill-value {
-        color: #f59e0b;
-      }
+      .stat-pill.pending .stat-pill-value {{
+        color: {WARN};
+      }}
       
-      .stat-pill.open {
-        border-left: 3px solid #ef4444;
-      }
+      .stat-pill.open {{
+        border-left: 3px solid {DANGER};
+      }}
       
-      .stat-pill.open .stat-pill-value {
-        color: #ef4444;
-      }
+      .stat-pill.open .stat-pill-value {{
+        color: {DANGER};
+      }}
       
-      .stat-pill.complete {
-        border-left: 3px solid #10b981;
-      }
+      .stat-pill.complete {{
+        border-left: 3px solid {OK};
+      }}
       
-      .stat-pill.complete .stat-pill-value {
-        color: #10b981;
-      }
+      .stat-pill.complete .stat-pill-value {{
+        color: {OK};
+      }}
     </style>
     """, unsafe_allow_html=True)
     

@@ -15,26 +15,31 @@ import html
 
 import streamlit as st
 
-# ───────────────────────────── tokens ─────────────────────────────
-INK = "#0f1720"
-INK_2 = "#33404f"
-MUTED = "#6b7784"
-FAINT = "#98a2ae"
-LINE = "#e3e7ec"
-LINE_2 = "#eef1f4"
-BG = "#f6f7f9"
-SURFACE = "#ffffff"
+# ───────────────────────────── tokens (dark theme) ─────────────────────────────
+# Every colour the app uses lives here. app.py imports these same names for
+# the top nav bar and popovers, so nothing is ever hardcoded twice with a
+# chance of drifting out of sync.
+INK = "#eef2f7"        # primary text - near white
+INK_2 = "#c7d2dd"       # secondary text
+MUTED = "#93a1af"       # muted labels
+FAINT = "#66727f"       # faintest text / icons
+LINE = "#2a3644"        # card / control borders
+LINE_2 = "#202a37"      # subtle dividers
 
-ACCENT = "#0d6e63"
-ACCENT_2 = "#0f8578"
-OK = "#177245"
-WARN = "#9a5f0b"
-DANGER = "#b02318"
-INFO = "#2a5d99"
+BG = "#0b1220"          # page background
+SURFACE = "#131b28"     # card background
+SURFACE_2 = "#1a2331"   # hover / raised surface
 
-NAV_BG = "#0e1621"
-NAV_BG_2 = "#16202d"
-NAV_TEXT = "#c8d2dc"
+ACCENT = "#14b8a6"
+ACCENT_2 = "#0d9488"
+OK = "#34d399"
+WARN = "#f59e0b"
+DANGER = "#f87171"
+INFO = "#60a5fa"
+
+NAV_BG = BG
+NAV_BG_2 = SURFACE
+NAV_TEXT = INK_2
 
 TONES = {
     "ok": OK, "warn": WARN, "danger": DANGER, "info": INFO,
@@ -126,8 +131,8 @@ def inject_css():
   .g5 {{ grid-template-columns:repeat(auto-fit,minmax(175px,1fr)); }}
   .stat {{ background:{SURFACE}; border:1px solid {LINE}; border-radius:12px;
            padding:1.15rem 1.25rem; position:relative; overflow:hidden;
-           transition:all .2s ease; box-shadow:0 1px 2px rgba(15,23,32,.04); }}
-  .stat:hover {{ border-color:{ACCENT}40; box-shadow:0 4px 12px rgba(13,110,99,.08); 
+           transition:all .2s ease; box-shadow:0 1px 3px rgba(0,0,0,.35); }}
+  .stat:hover {{ border-color:{ACCENT}60; box-shadow:0 6px 16px rgba(0,0,0,.4);
                  transform:translateY(-2px); }}
   .stat .edge {{ position:absolute; left:0; top:0; bottom:0; width:4px; border-radius:12px 0 0 12px; }}
   .stat .v {{ font-size:1.85rem; font-weight:720; line-height:1.1; color:{INK};
@@ -148,7 +153,7 @@ def inject_css():
   .pipe .seg {{ flex:1; background:{SURFACE}; border:1.5px solid {LINE};
                 border-radius:12px; padding:1rem 1.1rem; position:relative;
                 transition:all .2s ease; }}
-  .pipe .seg:hover {{ border-color:{ACCENT}50; box-shadow:0 2px 8px rgba(13,110,99,.06); }}
+  .pipe .seg:hover {{ border-color:{ACCENT}70; box-shadow:0 4px 14px rgba(0,0,0,.35); }}
   .pipe .seg .n {{ font-size:1.52rem; font-weight:720; color:{INK};
                    font-variant-numeric:tabular-nums; line-height:1.1; }}
   .pipe .seg .c {{ font-size:.8rem; color:{MUTED}; margin-top:.3rem; font-weight:550; }}
@@ -182,9 +187,9 @@ def inject_css():
   .note .b {{ opacity:.92; }}
 
   /* ── empty state ──────────────────────────────────────── */
-  .empty {{ background:{SURFACE}; border:1px dashed #d6dce3; border-radius:12px;
+  .empty {{ background:{SURFACE}; border:1px dashed {LINE}; border-radius:12px;
             padding:2.1rem 1.4rem; text-align:center; margin:.4rem 0 1rem 0; }}
-  .empty .ic {{ font-size:1.6rem; opacity:.5; }}
+  .empty .ic {{ font-size:1.6rem; opacity:.6; }}
   .empty .t {{ font-size:.98rem; font-weight:620; color:{INK}; margin-top:.5rem; }}
   .empty .s {{ font-size:.83rem; color:{MUTED}; margin-top:.3rem;
                max-width:52ch; margin-left:auto; margin-right:auto; }}
@@ -210,16 +215,28 @@ def inject_css():
   .kv .v {{ color:{INK}; font-weight:590; font-variant-numeric:tabular-nums;
             text-align:right; }}
 
-  /* ── native widgets ───────────────────────────────────── */
+  /* ── native widgets ──────────────────────────────────────
+     Button label text sits in a nested <p>. The global `p{{color}}`
+     rule above would otherwise win over the button's own color, which
+     is exactly what made button text unreadable — every button's
+     words rendered in the muted body-text colour instead of the
+     button's own colour. Forcing `p{{color:inherit}}` here fixes it
+     for every button on every page, not just the top nav. */
   .stButton>button, .stDownloadButton>button {{
-      border-radius:8px; font-weight:560; font-size:.845rem;
-      border:1px solid {LINE}; padding:.34rem .85rem; transition:all .13s ease; }}
+      border-radius:8px; font-weight:600; font-size:.845rem;
+      border:1px solid {LINE}; background:{SURFACE}; color:{INK_2};
+      padding:.38rem .9rem; transition:all .13s ease; }}
+  .stButton>button p, .stDownloadButton>button p,
+  .stButton>button div, .stDownloadButton>button div {{
+      color:inherit !important; }}
   .stButton>button:hover, .stDownloadButton>button:hover {{
-      border-color:{ACCENT}; color:{ACCENT}; }}
+      border-color:{ACCENT}; color:{ACCENT}; background:{SURFACE_2}; }}
   .stButton>button[kind="primary"] {{
-      background:{ACCENT}; border-color:{ACCENT}; color:#fff; }}
+      background:{ACCENT}; border-color:{ACCENT}; color:#04211d; font-weight:700; }}
   .stButton>button[kind="primary"]:hover {{
-      background:{ACCENT_2}; border-color:{ACCENT_2}; color:#fff; }}
+      background:{ACCENT_2}; border-color:{ACCENT_2}; color:#04211d; }}
+  .stButton>button:disabled, .stDownloadButton>button:disabled {{
+      opacity:.45; color:{FAINT}; }}
 
   div[data-testid="stDataFrame"] {{ border:1px solid {LINE}; border-radius:10px;
       overflow:hidden; background:{SURFACE}; }}
@@ -228,22 +245,38 @@ def inject_css():
 
   div[data-testid="stExpander"] {{ border:1px solid {LINE}; border-radius:10px;
                                    background:{SURFACE}; }}
-  div[data-testid="stExpander"] summary {{ font-size:.85rem; font-weight:580; }}
+  div[data-testid="stExpander"] summary {{ font-size:.85rem; font-weight:580;
+                                           color:{INK_2}; }}
 
   div[data-testid="stFileUploader"] {{ background:{SURFACE};
-      border:1px dashed #d1d8e0; border-radius:11px; padding:.55rem .75rem; }}
+      border:1px dashed {LINE}; border-radius:11px; padding:.55rem .75rem; }}
   div[data-testid="stFileUploader"] section {{ padding:.35rem 0; }}
+  div[data-testid="stFileUploader"] small {{ color:{MUTED}; }}
 
   .stTabs [data-baseweb="tab-list"] {{ gap:.15rem; border-bottom:1px solid {LINE}; }}
   .stTabs [data-baseweb="tab"] {{ font-size:.855rem; font-weight:560;
       padding:.5rem .85rem; color:{MUTED}; }}
+  .stTabs [data-baseweb="tab"] p {{ color:inherit !important; }}
   .stTabs [aria-selected="true"] {{ color:{ACCENT}; }}
 
   .stTextInput input, .stNumberInput input, .stTextArea textarea,
-  div[data-baseweb="select"]>div {{ border-radius:8px; font-size:.85rem; }}
+  div[data-baseweb="select"]>div {{ border-radius:8px; font-size:.85rem;
+      background:{SURFACE}; color:{INK}; border-color:{LINE}; }}
+  .stTextInput input::placeholder, .stTextArea textarea::placeholder {{
+      color:{FAINT}; }}
 
   div[data-testid="stMetric"] {{ background:{SURFACE}; border:1px solid {LINE};
       border-radius:10px; padding:.7rem .9rem; }}
+  div[data-testid="stMetric"] label {{ color:{MUTED} !important; }}
+  div[data-testid="stMetricValue"] {{ color:{INK} !important; }}
+
+  /* Popovers (Operator / Admin / Status) inherit the same card colours */
+  div[data-testid="stPopoverBody"] {{ background:{SURFACE};
+      border:1px solid {LINE}; }}
+
+  /* Alerts (st.info / st.success / st.warning / st.error) keep readable
+     text against their tinted dark backgrounds */
+  div[data-testid="stAlert"] p {{ color:inherit !important; }}
 
   /* ── sidebar (HIDDEN) ───────────────────────────────────── */
   section[data-testid="stSidebar"] {{ display: none !important; }}
@@ -255,8 +288,6 @@ def inject_css():
 
   /* nav rows are buttons so only one can ever look active */
   section[data-testid="stSidebar"] .stButton {{ display: none !important; }}
-
-  /* Unused - nav moved to top */
 </style>
 """, unsafe_allow_html=True)
 
@@ -391,13 +422,15 @@ def chart(fig, height=300, legend=False):
     """Apply the house chart style. bargap keeps bars from filling the plot
     when a chart only has two or three categories."""
     fig.update_layout(
-        template="simple_white", height=height, bargap=0.45,
+        template="plotly_dark", height=height, bargap=0.45,
         margin=dict(t=8, b=8, l=8, r=8),
         font=dict(family="system-ui, -apple-system, Segoe UI, sans-serif",
-                  size=12, color=INK),
+                  size=12, color=INK_2),
         showlegend=legend,
         legend=dict(orientation="h", y=1.13, x=0, title_text=""),
-        xaxis=dict(showgrid=False, zeroline=False),
-        yaxis=dict(showgrid=True, gridcolor=LINE_2, zeroline=False),
+        xaxis=dict(showgrid=False, zeroline=False, linecolor=LINE,
+                   tickfont=dict(color=MUTED)),
+        yaxis=dict(showgrid=True, gridcolor=LINE_2, zeroline=False,
+                   linecolor=LINE, tickfont=dict(color=MUTED)),
         plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
     return fig

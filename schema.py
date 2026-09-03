@@ -73,10 +73,7 @@ D_RESOLVED = "RESOLVED"
 D_CLOSED = "CLOSED"
 
 # Pending register - a GRN held up at either stage, with the reason
-STAGE_KORBER = "KORBER GRN"
-STAGE_AX = "AX GRN"
-P_OPEN = "OPEN"
-P_CLEARED = "CLEARED"
+# (STAGE_KORBER / STAGE_AX / P_OPEN / P_CLEARED are defined once above.)
 
 # ASN level status
 S_NEW = "NEW"
