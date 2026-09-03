@@ -211,7 +211,11 @@ def auto_reconcile(inv: pd.DataFrame, cfg: dict, user: str = "auto",
 
     # 5b ── keep the pending register in step with the result
     opens, clears = [], []
-    for _, r in sm.iterrows():
+    if not pending_enabled():
+        sm_iter = []
+    else:
+        sm_iter = list(sm.iterrows())
+    for _, r in sm_iter:
         a = clean(r["ASN NO"])
         if not a:
             continue
@@ -339,6 +343,11 @@ def build_mismatch_email(summary: pd.DataFrame, disc: pd.DataFrame,
 #  remark, so the hold-ups are a maintained list rather than something you
 #  have to re-derive from the reconciliation every time.
 # ═══════════════════════════════════════════════════════════════════
+def pending_enabled() -> bool:
+    """False when the deployed schema.py has no PENDING sheet yet."""
+    return gsheets.has_sheet("PENDING") and hasattr(schema, "PENDING_HEADERS")
+
+
 def pending_id(asn: str, stage: str) -> str:
     """One row per ASN per stage, so updates land on the same record."""
     return f"{nkey(asn)}|{nkey(stage)}"
@@ -370,7 +379,7 @@ def sync_pending(opens: list[dict], clears: list[str], user: str = "auto") -> di
     is already recorded alone, so an operator's remark survives every
     later reconciliation. `clears` are ids to mark CLEARED.
     """
-    if not opens and not clears:
+    if not opens and not clears or not pending_enabled():
         return {"opened": 0, "cleared": 0}
 
     ts = now_str()
@@ -445,6 +454,8 @@ def clear_stage(asns: list[str], stage: str, user: str = "") -> dict:
 
 
 def open_pending(stage: str | None = None) -> pd.DataFrame:
+    if not pending_enabled():
+        return pd.DataFrame()
     df = gsheets.get_df("PENDING")
     if df.empty:
         return df

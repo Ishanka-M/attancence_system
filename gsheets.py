@@ -209,6 +209,29 @@ def _update(ws, values, rng="A1"):
         api(ws.update, rng, values, value_input_option="USER_ENTERED")
 
 
+def has_sheet(sheet_key: str) -> bool:
+    """True when this build of schema.py defines the sheet."""
+    return sheet_key in schema.SHEETS
+
+
+def _require(sheet_key: str) -> dict:
+    """
+    Look up a sheet definition, failing with something actionable.
+
+    A KeyError here means the deployed schema.py predates the code calling
+    it - normally a partial upload where app.py was refreshed but schema.py
+    was not.
+    """
+    cfg = schema.SHEETS.get(sheet_key)
+    if cfg is None:
+        raise RuntimeError(
+            f"'{sheet_key}' is not defined in schema.py. The files are from "
+            f"different releases - upload every .py file from the latest "
+            f"package, restart the app, then use Setup > Create or update "
+            f"all sheets.")
+    return cfg
+
+
 def _ws(sheet_key: str):
     """
     Return the worksheet, creating it on the spot (with headers and seed
@@ -216,7 +239,7 @@ def _ws(sheet_key: str):
     WorksheetNotFound.
     """
     sh = get_spreadsheet()
-    cfg = schema.SHEETS[sheet_key]
+    cfg = _require(sheet_key)
     title, headers = cfg["title"], cfg["headers"]
     try:
         ws = api(sh.worksheet, title)
@@ -379,8 +402,12 @@ def missing_columns() -> dict[str, list[str]]:
 @st.cache_data(ttl=90, show_spinner=False)
 def get_df(sheet_key: str) -> pd.DataFrame:
     """Read a worksheet into a DataFrame (cached)."""
+    cfg = schema.SHEETS.get(sheet_key)
+    if cfg is None:
+        # unknown to this build of schema.py - hand back nothing rather than
+        # breaking the page; the write path reports it properly
+        return pd.DataFrame()
     sh = get_spreadsheet()
-    cfg = schema.SHEETS[sheet_key]
     try:
         ws = api(sh.worksheet, cfg["title"])
     except gspread.WorksheetNotFound:
@@ -414,7 +441,7 @@ def append_rows(sheet_key: str, rows: list[list]):
 
 def overwrite(sheet_key: str, df: pd.DataFrame):
     """Clear the sheet and rewrite it from the DataFrame."""
-    cfg = schema.SHEETS[sheet_key]
+    cfg = _require(sheet_key)
     ws = _ws(sheet_key)
     df = df.reindex(columns=cfg["headers"]).fillna("")
     body = [cfg["headers"]] + df.astype(str).values.tolist()
@@ -433,7 +460,7 @@ def upsert(sheet_key: str, rows: list[dict]) -> tuple[int, int]:
     Upsert by the schema key column: update when the key already exists,
     otherwise append. Returns (added, updated).
     """
-    cfg = schema.SHEETS[sheet_key]
+    cfg = _require(sheet_key)
     headers, key = cfg["headers"], cfg.get("key")
     if not key:
         append_rows(sheet_key, [[r.get(h, "") for h in headers] for r in rows])
@@ -466,7 +493,7 @@ def upsert(sheet_key: str, rows: list[dict]) -> tuple[int, int]:
 
 def replace_rows(sheet_key: str, new_df: pd.DataFrame, key_values: list[str]):
     """Drop rows whose key is in key_values, then append new_df."""
-    cfg = schema.SHEETS[sheet_key]
+    cfg = _require(sheet_key)
     key = cfg["key"]
     cur = get_df(sheet_key)
     if not cur.empty and key:
@@ -487,7 +514,7 @@ def upsert_by(sheet_key: str, rows: list[dict], key_cols: list[str],
 
     Returns (added, replaced).
     """
-    cfg = schema.SHEETS[sheet_key]
+    cfg = _require(sheet_key)
     headers = cfg["headers"]
 
     def key_of(get) -> str:
@@ -542,7 +569,7 @@ def clear_sheet(sheet_key: str) -> int:
     """Remove all data rows, keeping only the header row."""
     df = get_df(sheet_key)
     n = len(df)
-    overwrite(sheet_key, pd.DataFrame(columns=schema.SHEETS[sheet_key]["headers"]))
+    overwrite(sheet_key, pd.DataFrame(columns=_require(sheet_key)["headers"]))
     return n
 
 

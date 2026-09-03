@@ -246,6 +246,15 @@ if st.sidebar.button("Refresh data"):
 if _new_tabs:
     st.sidebar.info("Created: " + ", ".join(_new_tabs))
 
+_expected = ["ASN_SUMMARY", "ASN_DETAIL", "INVENTORY", "DISCREPANCY", "AX_GRN",
+             "PENDING", "ASN_IMAGES", "IMAGE_DATA", "RECON_LOG", "EMAIL_LOG",
+             "USER-M", "SETTINGS"]
+_absent = [k for k in _expected if not gsheets.has_sheet(k)]
+if _absent:
+    st.sidebar.error("schema.py is out of date — missing "
+                     + ", ".join(_absent)
+                     + ". Upload every .py file from the latest package.")
+
 _st = gsheets.api_stats()
 _bar = DANGER if _st["last_minute"] > _st["limit"] * .8 else "#4bb3a2"
 _url = gsheets.spreadsheet_url()
@@ -1154,6 +1163,14 @@ elif page == "Pending List":
     hero("Pending List",
          "Every GRN held up at Korber or AX, with the reason and a remark", "◔")
 
+    if not pipeline.pending_enabled():
+        ui.note("This page needs the PENDING sheet, which the deployed "
+                "schema.py does not define. Upload every .py file from the "
+                "latest package, restart the app, then use Setup - Sheets to "
+                "create it.",
+                "Files are from different releases", "danger")
+        st.stop()
+
     pend = gsheets.get_df("PENDING")
     summ = gsheets.get_df("ASN_SUMMARY")
     asn_opts = sorted({clean(a) for a in summ["ASN NO"] if clean(a)}) \
@@ -1488,9 +1505,15 @@ elif page == "AX GRN":
                "For ASNs that still carry a discrepancy but have to be posted. "
                "The override, the reason and your remark are all recorded.")
 
-    summ_all = gsheets.get_df("ASN_SUMMARY")
+    if not pipeline.pending_enabled():
+        ui.note("This needs the PENDING sheet from the latest schema.py. "
+                "Upload every .py file from the package and restart.",
+                "Not available in this build", "warn")
+        blocked = []
+        summ_all = pd.DataFrame()
+    else:
+        summ_all = gsheets.get_df("ASN_SUMMARY")
     already = set(ax["ASN NO"].astype(str)) if not ax.empty else set()
-    blocked = []
     if not summ_all.empty:
         m = ((summ_all["OVERALL"] != schema.S_COMPLETE)
              & (~summ_all["ASN NO"].astype(str).isin(already)))

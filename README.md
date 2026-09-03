@@ -221,6 +221,11 @@ When a new version adds a column, existing sheets keep working: pages only
 read the columns that are actually present, and **Setup → Sheets** flags
 which sheets are behind and adds the new headers without touching the data.
 
+If a new version adds a whole sheet, upload **every** `.py` file from the
+package together. A mismatched set — say a new `app.py` with an old
+`schema.py` — is detected at start-up: the sidebar names the missing sheets
+and the affected page explains what to upload instead of failing.
+
 ---
 
 ## Setup
