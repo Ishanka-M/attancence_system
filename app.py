@@ -242,7 +242,7 @@ st.markdown("""
   }
   
   .top-nav-brand-sub {
-    color: #7d8b9a;
+    color: #9db3c4;
     font-size: 0.7rem;
     line-height: 1;
   }
@@ -264,7 +264,7 @@ st.markdown("""
   .top-nav-group-label {
     font-size: 0.64rem;
     font-weight: 720;
-    color: #63727f;
+    color: #8fa1b0;
     text-transform: uppercase;
     padding: 0 0.5rem;
     margin-right: 0.3rem;
@@ -273,13 +273,13 @@ st.markdown("""
   
   .top-nav-right {
     display: flex;
-    gap: 1rem;
+    gap: 1.2rem;
     margin-left: auto;
     align-items: center;
-    padding-left: 1rem;
+    padding-left: 1.2rem;
     border-left: 1px solid #1e2937;
     flex-wrap: wrap;
-    min-width: 150px;
+    min-width: auto;
   }
   
   .top-nav-user-info {
@@ -290,17 +290,45 @@ st.markdown("""
   }
   
   .top-nav-user-name {
-    color: #c8d2dc;
-    font-size: 0.8rem;
-    font-weight: 550;
+    color: #e8f0f8;
+    font-size: 0.82rem;
+    font-weight: 600;
     line-height: 1.2;
   }
   
   .top-nav-user-role {
-    color: #7d8b9a;
-    font-size: 0.65rem;
+    color: #a3b8ca;
+    font-size: 0.68rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
+    font-weight: 550;
+  }
+  
+  /* Header items in top nav */
+  .top-nav-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    align-items: center;
+    min-width: 80px;
+  }
+  
+  .top-nav-header-icon {
+    font-size: 1.1rem;
+  }
+  
+  .top-nav-header-label {
+    font-size: 0.68rem;
+    font-weight: 650;
+    color: #e8f0f8;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    text-align: center;
+  }
+  
+  .top-nav-header-sub {
+    font-size: 0.6rem;
+    color: #a3b8ca;
   }
 </style>
 """, unsafe_allow_html=True)
@@ -330,6 +358,26 @@ nav_html += ''.join(group_html)
 nav_html += '''
 </div>
 <div class="top-nav-right">
+  <div class="top-nav-header">
+    <span class="top-nav-header-icon">👤</span>
+    <span class="top-nav-header-label">Operator</span>
+  </div>
+  
+  <div class="top-nav-header">
+    <span class="top-nav-header-icon">🔐</span>
+    <span class="top-nav-header-label">Admin</span>
+  </div>
+  
+  <div class="top-nav-header">
+    <span class="top-nav-header-icon">🔄</span>
+    <span class="top-nav-header-label">Data</span>
+  </div>
+  
+  <div class="top-nav-header">
+    <span class="top-nav-header-icon">ℹ️</span>
+    <span class="top-nav-header-label">Status</span>
+  </div>
+  
   <div class="top-nav-user-info">
     <div class="top-nav-user-name">''' + SS.get("user", "Guest") + '''</div>
     <div class="top-nav-user-role">''' + ("🔓 " + SS.get("role", "user").upper() if SS.get("user") else "Welcome") + '''</div>
@@ -356,55 +404,23 @@ for idx, page_name in enumerate(PAGES):
 
 page = SS["page"]
 
-# Session info section
-st.markdown("---")
-col1, col2, col3, col4 = st.columns([1.2, 1.5, 1.2, 1])
+# ═══════════════════════════════════════════════════════════════════
+#  SESSION MANAGEMENT (Background)
+# ═══════════════════════════════════════════════════════════════════
+# Operator selection
+names = [n for n in _users["USER NAME"].astype(str) if n.strip()] \
+    if not _users.empty else []
 
-with col1:
-    st.markdown("**👤 Operator**")
-    names = [n for n in _users["USER NAME"].astype(str) if n.strip()] \
-        if not _users.empty else []
-    who = st.selectbox("Select", ["Select"] + names + ["Add a name"],
-                       index=0, label_visibility="collapsed", key="operator")
-    if who == "Add a name":
-        who = st.text_input("New name", value=SS.get("user", ""), label_visibility="collapsed")
-    SS["user"] = "" if who == "Select" else who
-
-with col2:
-    st.markdown("**🔐 Admin Access**")
-    with st.expander("Sign in"):
-        pin = st.text_input("PIN", type="password", key="pin_in", label_visibility="collapsed")
-        if st.button("Verify", key="pin_btn", use_container_width=True):
-            _s = gsheets.settings_dict()
-            SS["role"] = "admin" if pin == str(_s.get("ADMIN_PIN", "1234")) else "user"
-            st.success("✅ Admin access granted") if SS["role"] == "admin" else st.error("❌ Wrong PIN")
-
-with col3:
-    st.markdown("**🔄 Data**")
-    if st.button("Refresh", key="refresh_btn", use_container_width=True):
-        gsheets.refresh()
-        st.rerun()
-
-with col4:
-    st.markdown("**ℹ️ Status**")
-    if _new_tabs:
-        st.info(f"✅ {len(_new_tabs)} sheets created")
-
+# Admin PIN verification & Data refresh handled via separate ui
 _expected = ["ASN_SUMMARY", "ASN_DETAIL", "INVENTORY", "DISCREPANCY", "AX_GRN",
              "PENDING", "RECON_LOG", "EMAIL_LOG", "USER-M", "SETTINGS"]
 _absent = [k for k in _expected if not gsheets.has_sheet(k)]
 if _absent:
     st.error(f"⚠️ Schema mismatch - missing sheets: {', '.join(_absent)}")
 
-_st = gsheets.api_stats()
-_bar = DANGER if _st["last_minute"] > _st["limit"] * .8 else "#4bb3a2"
-_url = gsheets.spreadsheet_url()
-ui.nav_footer([
-    ("Operator", ui.esc(SS["user"] or "not set")),
-    ("Access", "admin" if SS["role"] == "admin" else "standard"),
-    ("API / min", f"<span style='color:{_bar}'>{_st['last_minute']}"
-                  f"/{_st['limit']}</span>"),
-] + ([("Sheet", f"<a href='{_url}' target='_blank'>open</a>")] if _url else []))
+# ═══════════════════════════════════════════════════════════════════
+#  PAGE ROUTING
+# ═══════════════════════════════════════════════════════════════════
 
 
 def topbar_for(page_name: str):
