@@ -1875,7 +1875,7 @@ elif page == "Dashboard":
     log = gsheets.get_df("RECON_LOG")
 
     last = clean(log["RUN AT"].iloc[-1]) if not log.empty else "not yet run"
-    hero("Dashboard", f"ASN → Korber GRN → AX GRN Processing Pipeline · Last reconciliation {last}", "📊")
+    hero("Dashboard", f"ASN → Körber GRN → AX GRN · Last reconciliation {last}", "📊")
 
     if summ.empty:
         ui.empty("◧", "Nothing to show yet",
@@ -1895,22 +1895,22 @@ elif page == "Dashboard":
     tally = int((det["MATCH STATUS"] == schema.M_MATCHED).sum()) if not det.empty else 0
     rate = (tally / lines * 100) if lines else 0
     pending = n_asn - n_comp
+    variance = rec_qty - asn_qty
+    holds = pipeline.open_pending()
 
-    # Professional summary cards layout
-    ui.section("Processing Summary", "Current status of all ASN shipments in the system", 1)
-    
-    a, b, c, d = st.columns(4)
-    kpi(a, n_asn, "Total ASNs",
-        note=f"{lines} lines · {fmt_num(asn_qty)} qty")
+    # ── one clean row of the numbers that actually matter ──
+    a, b, c, d, e = st.columns(5)
+    kpi(a, n_asn, "Total ASNs", note=f"{lines} lines")
     kpi(b, f"{rate:.0f}%", "Match Rate", ACCENT, f"{tally}/{lines} lines")
-    kpi(c, n_open, "Open Issues", DANGER if n_open else OK,
-        f"{n_res} resolved")
-    kpi(d, pending, "Pending ASNs", WARN if pending else OK,
-        f"{n_comp} complete")
+    kpi(c, n_open, "Open Issues", DANGER if n_open else OK, f"{n_res} resolved")
+    kpi(d, pending, "Pending", WARN if pending else OK, f"{n_comp} complete")
+    kpi(e, fmt_num(variance), "Qty Variance",
+        OK if abs(variance) < 1 else WARN,
+        f"{(variance/asn_qty*100):+.1f}%" if asn_qty else "")
 
-    # Pipeline visualization
+    # ── pipeline — the one visual the dashboard needs ──
     st.markdown("")
-    ui.section("Processing Pipeline", "Movement through each stage of the GRN process", 2)
+    ui.section("Processing Pipeline", "Movement through each stage of the GRN process")
     pipeline_strip([
         ("ASN Uploaded", n_asn, MUTED),
         ("Körber GRN Done", n_korber, ACCENT),
@@ -1918,202 +1918,46 @@ elif page == "Dashboard":
         ("Fully Complete", n_comp, OK),
     ])
 
-    # Quantity summary
+    # ── requires action — the one table worth surfacing here ──
     st.markdown("")
-    ui.section("Quantity Reconciliation", "Expected vs received shipment volumes", 3)
-    e, f, g = st.columns(3)
-    kpi(e, fmt_num(asn_qty), "Expected Qty", INK)
-    kpi(f, fmt_num(rec_qty), "Received Qty", ACCENT)
-    variance = rec_qty - asn_qty
-    var_color = OK if abs(variance) < 1 else WARN
-    kpi(g, fmt_num(variance), "Variance", var_color,
-        f"{(variance/asn_qty*100):.1f}%" if asn_qty else "")
+    need = summ[summ["OVERALL"] != schema.S_COMPLETE]
+    ui.section("Requires Action",
+               "ASNs that are not yet fully complete" if not need.empty
+               else "Every ASN is fully complete", 2)
+    if need.empty:
+        st.success("✅ Nothing outstanding — all ASNs are fully complete.")
+    else:
+        show(pick(need, ["ASN NO", "TOTAL LINES", "MATCHED LINES", "MISSING LINES",
+                   "MISMATCH LINES", "EXTRA LINES", "STATUS", "KORBER GRN",
+                   "AX GRN", "LAST RECON"]), height=260)
+    if holds:
+        st.caption(f"⚠ {len(holds)} open hold(s) in the pending register — "
+                   "see the Pending List page.")
 
-    # Finalize summary report section with date range
-    st.markdown("---")
-    ui.section("Finalize Summary Report",
-               "Download pending, discrepancies and completed ASNs in one workbook", 4)
-    
-    # Date range selector
-    col1, col2, col3, col4 = st.columns([1.5, 1.5, 1, 1.5])
-    
-    with col1:
-        start_date = st.date_input(
-            "📅 From Date",
-            value=date.today().replace(day=1),
-            key="report_start_date",
-            help="Select the start date for the report"
-        )
-    
-    with col2:
-        end_date = st.date_input(
-            "📅 To Date",
-            value=date.today(),
-            key="report_end_date",
-            help="Select the end date for the report"
-        )
-    
-    with col3:
-        st.write("")
-        st.write("")
-        if st.button("🔄 Reset Dates", key="reset_dates", help="Reset to default date range"):
+    # ── report export — a utility, tucked away so it doesn't compete
+    #    with the numbers above for attention ──
+    with st.expander("📥 Export a summary report", expanded=False):
+        c1, c2, c3, c4 = st.columns([1.4, 1.4, 1, 1.6])
+        start_date = c1.date_input("From", value=date.today().replace(day=1),
+                                   key="report_start_date")
+        end_date = c2.date_input("To", value=date.today(),
+                                 key="report_end_date")
+        c3.write("")
+        c3.write("")
+        if c3.button("Reset", key="reset_dates", use_container_width=True):
             st.session_state.report_start_date = date.today().replace(day=1)
             st.session_state.report_end_date = date.today()
             st.rerun()
-    
-    with col4:
-        st.write("")
-        st.write("")
+        c4.write("")
+        c4.write("")
         if start_date <= end_date:
-            report_data = finalize_bytes(start_date, end_date)
-            st.download_button(
-                "📥 Download Report",
-                report_data,
+            c4.download_button(
+                "Download report", finalize_bytes(start_date, end_date),
                 file_name=f"Finalize_Summary_{start_date:%Y%m%d}_{end_date:%Y%m%d}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="primary",
-                help="Download the summary report for the selected date range"
-            )
+                type="primary", use_container_width=True)
         else:
-            st.error("Start date must be before end date", icon="⚠️")
-    
-    # Status info
-    holds = pipeline.open_pending()
-    st.info(f"ℹ️ {len(holds)} open hold(s) in the pending register" +
-            (" — review the Pending List page for details."
-             if len(holds) else " — all clear!"))
-
-    # Needs action section
-    st.markdown("---")
-    ui.section("Requires Action", "ASNs that are not yet fully complete", 5)
-    need = summ[summ["OVERALL"] != schema.S_COMPLETE]
-    if need.empty:
-        st.success("✅ All ASNs are fully complete!")
-    else:
-        st.warning(f"⚠️ {len(need)} ASN(s) require action")
-        show(pick(need, ["ASN NO", "TOTAL LINES", "MATCHED LINES", "MISSING LINES",
-                   "MISMATCH LINES", "EXTRA LINES", "STATUS", "KORBER GRN",
-                   "AX GRN", "LAST RECON"]), height=300)
-
-    # Bottom quick stats section
-    st.markdown("---")
-    st.markdown(f"""
-    <style>
-      .bottom-stats {{
-        display: flex;
-        gap: 1rem;
-        flex-wrap: wrap;
-        margin-top: 1.5rem;
-        padding: 1.5rem 0;
-      }}
-      
-      .stat-pill {{
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        padding: 1.2rem 1.8rem;
-        background: {ui.SURFACE};
-        border: 1px solid {ui.LINE};
-        border-radius: 10px;
-        min-width: 140px;
-        transition: all 0.3s ease;
-        cursor: default;
-      }}
-      
-      .stat-pill:hover {{
-        border-color: {ACCENT};
-        box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
-        transform: translateY(-2px);
-      }}
-      
-      .stat-pill-value {{
-        font-size: 1.8rem;
-        font-weight: 720;
-        color: {ACCENT};
-        line-height: 1;
-      }}
-      
-      .stat-pill-label {{
-        font-size: 0.8rem;
-        color: {MUTED};
-        margin-top: 0.5rem;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-        font-weight: 600;
-      }}
-      
-      .stat-pill.pending {{
-        border-left: 3px solid {WARN};
-      }}
-      
-      .stat-pill.pending .stat-pill-value {{
-        color: {WARN};
-      }}
-      
-      .stat-pill.open {{
-        border-left: 3px solid {DANGER};
-      }}
-      
-      .stat-pill.open .stat-pill-value {{
-        color: {DANGER};
-      }}
-      
-      .stat-pill.complete {{
-        border-left: 3px solid {OK};
-      }}
-      
-      .stat-pill.complete .stat-pill-value {{
-        color: {OK};
-      }}
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # Create bottom stats HTML
-    stats_html = '<div class="bottom-stats">'
-    
-    # ASNs count
-    stats_html += f'''
-    <div class="stat-pill">
-      <div class="stat-pill-value">{n_asn}</div>
-      <div class="stat-pill-label">ASNs</div>
-    </div>
-    '''
-    
-    # AX Pending count
-    stats_html += f'''
-    <div class="stat-pill pending">
-      <div class="stat-pill-value">{n_axp}</div>
-      <div class="stat-pill-label">AX Pending</div>
-    </div>
-    '''
-    
-    # Open Issues count
-    stats_html += f'''
-    <div class="stat-pill open">
-      <div class="stat-pill-value">{n_open}</div>
-      <div class="stat-pill-label">Open Issues</div>
-    </div>
-    '''
-    
-    # Completed count
-    stats_html += f'''
-    <div class="stat-pill complete">
-      <div class="stat-pill-value">{n_comp}</div>
-      <div class="stat-pill-label">Completed</div>
-    </div>
-    '''
-    
-    # Match Rate
-    stats_html += f'''
-    <div class="stat-pill">
-      <div class="stat-pill-value">{rate:.0f}%</div>
-      <div class="stat-pill-label">Match Rate</div>
-    </div>
-    '''
-    
-    stats_html += '</div>'
-    st.markdown(stats_html, unsafe_allow_html=True)
+            c4.error("From date is after To date")
 
 
 # ═══════════════════════════════════════════════════════════════════
