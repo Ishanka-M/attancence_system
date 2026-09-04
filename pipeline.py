@@ -26,10 +26,11 @@ import schema
 from matching import nkey, now_str, run_id
 from parsing import clean, fmt_num, to_num
 
-# Inventory rows are identified by invoice number + pallet. When the invoice
-# number is blank the pallet alone identifies the row.
-INV_KEY = ["INVOICE NUMBER", "PALLET"]
-INV_KEY_FALLBACK = ["PALLET"]
+# Inventory rows are identified by Pallet + Item Number + Lot Number - the
+# real "line" on a pallet, since one pallet can carry more than one item
+# or lot. A row already in the sheet is only touched when its Actual Qty
+# in the upload has actually changed.
+INV_KEY = ["PALLET", "ITEM NUMBER", "LOT NUMBER"]
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -84,47 +85,71 @@ def from_sheet_rows(raw: pd.DataFrame) -> pd.DataFrame:
 
 def merge_inventory(inv: pd.DataFrame, snapshot: str = "") -> dict:
     """
-    Merge an uploaded inventory file into the INVENTORY sheet.
+    Merge an uploaded inventory file into the INVENTORY sheet, keyed by
+    Pallet + Item Number + Lot Number - the actual line on that pallet.
 
-    Every existing row for an Invoice Number + Pallet that appears in the
-    upload is removed, then all the uploaded rows are written. Replacing by
-    group rather than row matters when one pallet carries several items or
-    lots - a row-for-row swap would silently drop the extra lines. Anything
-    not present in the upload is left untouched.
+    - A pallet/item/lot not already in the sheet is added.
+    - One already in the sheet is only touched when the uploaded Actual
+      Qty is different from what's stored there - that row is then
+      replaced with the uploaded one, so the new Actual Qty (and anything
+      else that changed on it) is applied.
+    - One already in the sheet with the same Actual Qty is left exactly
+      as it is and is NOT re-added - so uploading the same file twice, or
+      an inventory export that mostly repeats yesterday's pallets, never
+      creates duplicate rows.
     """
     rows = to_sheet_rows(inv, snapshot)
     if rows.empty:
-        return {"uploaded": 0, "added": 0, "replaced": 0, "groups": 0,
-                "new_groups": 0, "total": len(gsheets.get_df("INVENTORY"))}
+        return {"uploaded": 0, "added": 0, "updated": 0, "unchanged": 0,
+                "total": len(gsheets.get_df("INVENTORY"))}
 
-    def key_of(invoice, pallet) -> str:
-        i, p = str(invoice or "").strip().upper(), str(pallet or "").strip().upper()
-        return f"{i}|{p}" if i else p
+    def key_of(pallet, item, lot) -> str:
+        return "|".join(str(x or "").strip().upper() for x in (pallet, item, lot))
 
-    keys = {key_of(r["INVOICE NUMBER"], r["PALLET"]) for _, r in rows.iterrows()}
-    keys.discard("")
+    rows = rows.reset_index(drop=True)
+    rows["_KEY"] = [key_of(r["PALLET"], r["ITEM NUMBER"], r["LOT NUMBER"])
+                     for _, r in rows.iterrows()]
+    rows = rows[rows["_KEY"].str.strip("|") != ""]
 
     cur = gsheets.get_df("INVENTORY")
-    replaced, prev_keys = 0, set()
-    if not cur.empty:
-        cur_keys = cur.apply(
-            lambda r: key_of(r.get("INVOICE NUMBER"), r.get("PALLET")), axis=1)
-        prev_keys = set(cur_keys)
-        hit = cur_keys.isin(keys)
-        replaced = int(hit.sum())
-        cur = cur[~hit]
+    added = updated = unchanged = 0
 
-    up_keys = rows.apply(
-        lambda r: key_of(r["INVOICE NUMBER"], r["PALLET"]), axis=1)
-    added = int((~up_keys.isin(prev_keys)).sum())
-    new_groups = len(keys - prev_keys)
+    if cur.empty:
+        added = len(rows)
+        out = rows.drop(columns="_KEY").reindex(columns=schema.INVENTORY_HEADERS)
+    else:
+        cur = cur.reset_index(drop=True).copy()
+        cur["_KEY"] = [key_of(r.get("PALLET"), r.get("ITEM NUMBER"), r.get("LOT NUMBER"))
+                        for _, r in cur.iterrows()]
+        cur_qty = (cur.drop_duplicates("_KEY", keep="last")
+                      .set_index("_KEY")["ACTUAL QTY"].map(to_num).to_dict())
 
-    out = pd.concat([cur, rows.reindex(columns=schema.INVENTORY_HEADERS)],
-                    ignore_index=True)
+        keep = []
+        for _, r in rows.iterrows():
+            k = r["_KEY"]
+            new_qty = to_num(r["ACTUAL QTY"])
+            if k not in cur_qty:
+                added += 1
+                keep.append(True)
+            elif abs(cur_qty[k] - new_qty) > 1e-9:
+                updated += 1
+                keep.append(True)
+            else:
+                unchanged += 1
+                keep.append(False)
+        rows_to_apply = rows[pd.Series(keep, index=rows.index)]
+
+        apply_keys = set(rows_to_apply["_KEY"])
+        cur_remaining = cur[~cur["_KEY"].isin(apply_keys)].drop(columns="_KEY")
+        out = pd.concat(
+            [cur_remaining,
+             rows_to_apply.drop(columns="_KEY").reindex(columns=schema.INVENTORY_HEADERS)],
+            ignore_index=True)
+
     gsheets.overwrite("INVENTORY", out)
 
-    return {"uploaded": len(rows), "added": added, "replaced": replaced,
-            "groups": len(keys), "new_groups": new_groups, "total": len(out)}
+    return {"uploaded": len(rows), "added": added, "updated": updated,
+            "unchanged": unchanged, "total": len(out)}
 
 
 # ═══════════════════════════════════════════════════════════════════

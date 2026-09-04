@@ -927,8 +927,11 @@ elif page == "Inventory":
     auto_mail = gsheets.setting_bool(s, "AUTO_EMAIL")
 
     st.caption(
-        f"Merge rule: rows with the same **Invoice Number + Pallet** are "
-        f"replaced, new rows are added. "
+        f"Merge rule: matched by **Pallet + Item Number + Lot Number**. A "
+        f"pallet/item/lot not already in the sheet is added; one already "
+        f"there is only updated when its **Actual Qty** in the upload has "
+        f"changed - unchanged rows are left exactly as they are and are "
+        f"not duplicated. "
         f"Automation — reconcile: {'on' if auto_recon else 'off'} · "
         f"AX push: {'on' if auto_push else 'off'} · "
         f"email: {'on' if auto_mail else 'off'} (Setup → Automation).")
@@ -953,11 +956,11 @@ elif page == "Inventory":
                 with st.spinner("Merging inventory..."):
                     merge = pipeline.merge_inventory(df)
                 st.success(
-                    f"Inventory merged - {merge['uploaded']} row(s) uploaded "
-                    f"across {merge['groups']} invoice/pallet group(s): "
-                    f"{merge['replaced']} existing row(s) replaced, "
-                    f"{merge['added']} row(s) new "
-                    f"({merge['new_groups']} new group(s)). "
+                    f"Inventory merged - {merge['uploaded']} row(s) read: "
+                    f"{merge['added']} new pallet/item/lot row(s) added, "
+                    f"{merge['updated']} row(s) had a changed Actual Qty "
+                    f"and were updated, {merge['unchanged']} row(s) were "
+                    f"already up to date and left untouched. "
                     f"{merge['total']} rows held in total.")
 
                 if auto_recon:
