@@ -1744,19 +1744,58 @@ elif page == "AX GRN":
         st.success("Nothing pending.")
     else:
         remarks = pipeline.pending_remarks()
+        att_all = gsheets.get_df("ATTACHMENTS") if storage.enabled() else pd.DataFrame()
+        att_counts = ({} if att_all.empty else
+                      att_all.groupby(att_all["ASN NO"].astype(str).map(clean))
+                             .size().to_dict())
         view = pend.copy()
         view["HOLD REASON"] = view["ASN NO"].astype(str).map(
             lambda a_: remarks.get(clean(a_), ""))
-        show(pick(view, ["ASN NO", "CLIENT CODE", "KORBER GRN NO",
-                         "KORBER GRN DATE", "TOTAL LINES", "TOTAL QTY",
-                         "OVERRIDE", "HOLD REASON",
-                         "OVERRIDE REASON", "REMARK", "PUSHED AT", "PUSHED BY"]))
+        if storage.enabled():
+            view["📎 FILES"] = view["ASN NO"].astype(str).map(
+                lambda a_: att_counts.get(clean(a_), 0))
+        cols = ["ASN NO", "CLIENT CODE", "KORBER GRN NO",
+                "KORBER GRN DATE", "TOTAL LINES", "TOTAL QTY",
+                "OVERRIDE", "HOLD REASON", "OVERRIDE REASON", "REMARK",
+                "PUSHED AT", "PUSHED BY"]
+        if storage.enabled():
+            cols.insert(1, "📎 FILES")
+        show(pick(view, cols))
 
         ui.section("Mark as done in AX")
         c1, c2, c3 = st.columns([2, 1, 1])
         sel = c1.multiselect("ASNs", list(pend["ASN NO"].astype(str)))
         ax_no = c2.text_input("AX GRN number", "")
         ax_dt = c3.date_input("AX GRN date", value=date.today())
+
+        # ── the invoice attachment(s) for whichever ASN(s) are picked
+        #    above, right where the AX GRN is actually being updated ──
+        if sel and storage.enabled():
+            sel_set = {clean(s) for s in sel}
+            hit = (att_all[att_all["ASN NO"].astype(str).map(clean).isin(sel_set)]
+                  if not att_all.empty else att_all)
+            with st.expander(
+                f"📎 {len(hit)} attachment(s) for the selected ASN(s)",
+                expanded=bool(len(hit))):
+                if hit.empty:
+                    st.caption("No photos, PDFs or Excel files on file for "
+                               "these ASN(s) — see the Attachments page to upload one.")
+                else:
+                    for _, r in hit.iterrows():
+                        ca, cb, cc = st.columns([2.6, 1, 1])
+                        ca.markdown(
+                            f"**{ui.esc(r['FILE NAME'])}**  \n"
+                            f"<span style='color:{MUTED};font-size:.78rem'>"
+                            f"ASN {ui.esc(r['ASN NO'])}"
+                            + (f" · Invoice {ui.esc(r['INVOICE NUMBER'])}"
+                               if clean(r['INVOICE NUMBER']) else "")
+                            + f" · {ui.esc(r['SIZE KB'])} KB</span>",
+                            unsafe_allow_html=True)
+                        cb.markdown(ui.badge(r["FILE TYPE"], "info"),
+                                   unsafe_allow_html=True)
+                        cc.link_button("⬇ Download", r["FILE URL"],
+                                      use_container_width=True,
+                                      key=f"ax_att_dl_{r['ATTACH ID']}")
 
         if st.button("Mark AX GRN done", type="primary", disabled=not sel):
             ts, user = now_str(), SS["user"] or "unknown"
