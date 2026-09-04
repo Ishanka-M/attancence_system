@@ -375,6 +375,68 @@ def note(body: str, title: str = "", tone: str = "info"):
                 unsafe_allow_html=True)
 
 
+def celebrate(message: str = "Saved", sub: str = ""):
+    """A calmer stand-in for st.balloons() - a checkmark that pops in with
+    a soft ring pulse in the app's own accent colour, then settles, instead
+    of confetti drifting up the whole screen."""
+    st.markdown(f"""
+    <div class="celebrate">
+      <div class="celebrate-ring"></div>
+      <div class="celebrate-check">
+        <svg viewBox="0 0 52 52" width="22" height="22">
+          <path fill="none" d="M14 27l7 7 16-16"/>
+        </svg>
+      </div>
+      <div class="celebrate-text">
+        <div class="celebrate-title">{esc(message)}</div>
+        {f'<div class="celebrate-sub">{esc(sub)}</div>' if sub else ""}
+      </div>
+    </div>
+    <style>
+      .celebrate {{
+          display:flex; align-items:center; gap:.85rem; position:relative;
+          background:{SURFACE}; border:1px solid {ACCENT}4d;
+          border-left:3px solid {ACCENT}; border-radius:10px;
+          padding:.75rem 1.1rem; margin:.5rem 0 .9rem 0; overflow:hidden;
+          animation: celebrate-in .5s cubic-bezier(.34,1.56,.64,1) both;
+      }}
+      .celebrate-ring {{
+          position:absolute; left:1.32rem; top:50%; width:30px; height:30px;
+          margin-top:-15px; border-radius:50%; border:2px solid {ACCENT};
+          animation: celebrate-ring 1s ease-out .12s both;
+      }}
+      .celebrate-check {{
+          flex:none; width:30px; height:30px; border-radius:50%;
+          background:{ACCENT}; display:flex; align-items:center;
+          justify-content:center; box-shadow:0 0 0 4px {ACCENT}1f;
+      }}
+      .celebrate-check svg path {{
+          stroke:#04211d; stroke-width:5; stroke-linecap:round;
+          stroke-linejoin:round; stroke-dasharray:36; stroke-dashoffset:36;
+          animation: celebrate-draw .4s ease .28s forwards;
+      }}
+      .celebrate-title {{
+          font-weight:660; font-size:.92rem; color:{INK}; line-height:1.3;
+          opacity:0; animation: celebrate-text .35s ease .32s forwards;
+      }}
+      .celebrate-sub {{
+          font-size:.78rem; color:{MUTED}; margin-top:.1rem;
+          opacity:0; animation: celebrate-text .35s ease .4s forwards;
+      }}
+      @keyframes celebrate-in {{
+          0% {{ opacity:0; transform:translateY(8px) scale(.96); }}
+          100% {{ opacity:1; transform:translateY(0) scale(1); }}
+      }}
+      @keyframes celebrate-ring {{
+          0% {{ transform:scale(.6); opacity:.9; }}
+          100% {{ transform:scale(2.1); opacity:0; }}
+      }}
+      @keyframes celebrate-draw {{ to {{ stroke-dashoffset:0; }} }}
+      @keyframes celebrate-text {{ to {{ opacity:1; }} }}
+    </style>
+    """, unsafe_allow_html=True)
+
+
 def empty(icon: str, title: str, subtitle: str = ""):
     st.markdown(f'<div class="empty"><div class="ic">{icon}</div>'
                 f'<div class="t">{esc(title)}</div>'

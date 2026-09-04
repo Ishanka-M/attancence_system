@@ -906,7 +906,8 @@ elif page == "ASN Upload":
             SS["parsed_asn"] = {}
             st.info("Next: upload the Korber inventory - reconciliation runs "
                     "automatically from there.")
-            st.balloons()
+            ui.celebrate(f"{total_rows} line(s) saved to Google Sheets",
+                        f"{', '.join(targets)}")
 
         if cB.button("Clear"):
             SS["parsed_asn"] = {}
@@ -1786,7 +1787,7 @@ elif page == "AX GRN":
             pipeline.clear_stage(sel, schema.STAGE_AX, user)
 
             st.success(f"{len(sel)} ASN(s) are now fully complete.")
-            st.balloons()
+            ui.celebrate(f"{len(sel)} ASN(s) completed", "Fully reconciled and posted to AX")
             st.rerun()
 
     ui.section("Send to AX despite a discrepancy",
