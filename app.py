@@ -1930,7 +1930,7 @@ elif page == "Dashboard":
         show(pick(need, ["ASN NO", "TOTAL LINES", "MATCHED LINES", "MISSING LINES",
                    "MISMATCH LINES", "EXTRA LINES", "STATUS", "KORBER GRN",
                    "AX GRN", "LAST RECON"]), height=260)
-    if holds:
+    if not holds.empty:
         st.caption(f"⚠ {len(holds)} open hold(s) in the pending register — "
                    "see the Pending List page.")
 
