@@ -12,6 +12,7 @@ Flow
 """
 from __future__ import annotations
 
+import mimetypes
 import uuid
 from datetime import date, datetime
 
@@ -50,6 +51,43 @@ def attach_file_type(filename: str) -> str:
     if ext in ("jpg", "jpeg", "png", "webp", "gif", "bmp"):
         return "IMAGE"
     return "FILE"
+
+
+def attachment_download(col, row, key_prefix: str):
+    """
+    Render a download control for one ATTACHMENTS row.
+
+    Images were uploaded as-is, so a direct link to their R2 URL is a
+    real download. PDFs and Excel files were stored gzip-compressed to
+    save space, so a direct link would just hand back a raw .gz blob —
+    instead this fetches it, decompresses it losslessly, and offers the
+    exact original file. That takes a moment, so it's a two-step click:
+    "Download" fetches it, then "Save file" is the real browser download.
+    """
+    aid = row["ATTACH ID"]
+    url = str(row["FILE URL"])
+    if not url.endswith(".gz"):
+        col.link_button("⬇ Download", url, use_container_width=True,
+                        key=f"{key_prefix}_{aid}")
+        return
+
+    cache_key = f"_dlbytes_{aid}"
+    if SS.get(cache_key) is not None:
+        mime = mimetypes.guess_type(row["FILE NAME"])[0] or "application/octet-stream"
+        col.download_button("💾 Save file", SS[cache_key],
+                            file_name=row["FILE NAME"], mime=mime,
+                            use_container_width=True,
+                            key=f"{key_prefix}_save_{aid}")
+    else:
+        if col.button("⬇ Download", key=f"{key_prefix}_prep_{aid}",
+                      use_container_width=True):
+            with st.spinner("Decompressing..."):
+                try:
+                    SS[cache_key] = storage.download_decompressed(url)
+                except Exception as e:
+                    st.error(f"Couldn't fetch that file: {e}")
+                    st.stop()
+            st.rerun()
 
 
 def finalize_bytes(start_date=None, end_date=None) -> bytes:
@@ -878,16 +916,25 @@ elif page == "ASN Upload":
                     up_rows, failed = [], []
                     for f in attach_files:
                         b = f.getvalue()
+                        ftype = attach_file_type(f.name)
                         for asn in attach_asns:
                             try:
                                 key = storage.object_key(asn, f.name)
-                                url = storage.upload(b, key, f.type)
+                                if ftype in ("PDF", "EXCEL"):
+                                    # Lossless gzip - documents shrink well
+                                    # and download_decompressed() hands
+                                    # back the exact original bytes.
+                                    url, _ = storage.upload_compressed(b, key, f.type)
+                                else:
+                                    # Images: uploaded as-is so thumbnails
+                                    # keep working straight off the URL.
+                                    url = storage.upload(b, key, f.type)
                                 up_rows.append({
                                     "ATTACH ID": uuid.uuid4().hex[:10].upper(),
                                     "ASN NO": asn,
                                     "INVOICE NUMBER": clean(attach_invoice),
                                     "FILE NAME": f.name,
-                                    "FILE TYPE": attach_file_type(f.name),
+                                    "FILE TYPE": ftype,
                                     "FILE URL": url,
                                     "SIZE KB": round(len(b) / 1024, 1),
                                     "UPLOADED AT": ts, "UPLOADED BY": user,
@@ -1325,9 +1372,7 @@ elif page == "Search":
                                             f"· ASN {ui.esc(r['ASN NO'])}")
                                 c2_.markdown(ui.badge(r["FILE TYPE"], "info"),
                                             unsafe_allow_html=True)
-                                c3_.link_button("⬇", r["FILE URL"],
-                                               use_container_width=True,
-                                               key=f"srch_dl_other_{r['ATTACH ID']}")
+                                attachment_download(c3_, r, "srch_dl_other")
                         continue
 
                     if q:
@@ -1618,8 +1663,7 @@ elif page == "Attachments":
                         + f" · {r['SIZE KB']} KB · {r['UPLOADED AT']}"
                         + (f" · by {r['UPLOADED BY']}" if clean(r['UPLOADED BY']) else ""))
                 with cdl:
-                    st.link_button("⬇ Download", r["FILE URL"],
-                                  use_container_width=True)
+                    attachment_download(cdl, r, "attpage")
                     if is_admin:
                         if st.button("🗑 Delete", key=f"del_att_{r['ATTACH ID']}",
                                     use_container_width=True):
@@ -1796,9 +1840,7 @@ elif page == "AX GRN":
                             unsafe_allow_html=True)
                         cb.markdown(ui.badge(r["FILE TYPE"], "info"),
                                    unsafe_allow_html=True)
-                        cc.link_button("⬇ Download", r["FILE URL"],
-                                      use_container_width=True,
-                                      key=f"ax_att_dl_{r['ATTACH ID']}")
+                        attachment_download(cc, r, "ax_att_dl")
 
         if st.button("Mark AX GRN done", type="primary", disabled=not sel):
             ts, user = now_str(), SS["user"] or "unknown"

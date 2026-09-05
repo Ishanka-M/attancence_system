@@ -15,6 +15,7 @@ together (upload -> get_url -> gsheets.upsert("ATTACHMENTS", ...)).
 """
 from __future__ import annotations
 
+import gzip
 import mimetypes
 import uuid
 
@@ -83,6 +84,49 @@ def upload(file_bytes: bytes, key: str, content_type: str = "") -> str:
                           ContentType=ct)
     base = c["public_base_url"].rstrip("/")
     return f"{base}/{key}"
+
+
+def upload_compressed(file_bytes: bytes, key: str, content_type: str = "") -> tuple[str, int]:
+    """
+    Gzip-compress a file losslessly and upload it under `key + '.gz'`.
+
+    Gzip is lossless - decompressing gives back the exact original bytes,
+    so this only saves storage/transfer for documents (PDF, Excel); images
+    are already compressed formats and barely shrink further, and would
+    stop rendering as thumbnails via their direct URL, so callers should
+    use plain upload() for those instead.
+
+    Returns (public_url, compressed_size_bytes).
+    """
+    if not enabled():
+        raise RuntimeError("Cloudflare R2 is not configured - see "
+                            ".streamlit/secrets.toml.example")
+    c = _cfg()
+    ct = content_type or mimetypes.guess_type(key)[0] or "application/octet-stream"
+    packed = gzip.compress(file_bytes, compresslevel=6)
+    gz_key = f"{key}.gz"
+    _client().put_object(Bucket=c["bucket_name"], Key=gz_key, Body=packed,
+                          ContentType="application/gzip",
+                          Metadata={"original-type": ct})
+    base = c["public_base_url"].rstrip("/")
+    return f"{base}/{gz_key}", len(packed)
+
+
+def fetch_bytes(url: str) -> bytes:
+    """Read an object straight back out of the bucket, given its public URL."""
+    if not enabled():
+        raise RuntimeError("Cloudflare R2 is not configured - see "
+                            ".streamlit/secrets.toml.example")
+    c = _cfg()
+    obj = _client().get_object(Bucket=c["bucket_name"], Key=url_to_key(url))
+    return obj["Body"].read()
+
+
+def download_decompressed(url: str) -> bytes:
+    """The inverse of upload_compressed() - fetch the .gz object and gunzip
+    it back to the exact original bytes. Lossless, so what comes out is
+    bit-for-bit identical to what was uploaded, at full original quality."""
+    return gzip.decompress(fetch_bytes(url))
 
 
 def delete(key: str) -> None:
