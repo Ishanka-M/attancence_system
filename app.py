@@ -276,6 +276,24 @@ def cfg_recon() -> dict:
     }
 
 
+def recheck_and_promote(asns: list[str], user: str) -> tuple[list[str], list[str]]:
+    """
+    Re-run reconciliation for these ASNs against the current Körber
+    inventory. Whatever now tallies is cleared and pushed into the AX GRN
+    queue on its own - no override recorded, because nothing was forced.
+    Whatever still doesn't tally stays exactly as it was.
+
+    Returns (moved, still_held).
+    """
+    inv_full = pipeline.from_sheet_rows(gsheets.get_df("INVENTORY"))
+    res = pipeline.auto_reconcile(
+        inv_full, cfg_recon(), user=user or "unknown",
+        asns=asns, note="Re-check", push_ax=True, make_email=False)
+    moved = res.get("ax_pushed") or []
+    still_held = [a for a in asns if a not in moved]
+    return moved, still_held
+
+
 # ───────────────────────────── navigation ─────────────────────────────
 try:
     _new_tabs = gsheets.ensure_missing_once()
@@ -1592,13 +1610,8 @@ elif page == "Pending List":
             if st.button("Re-check selected ASN(s)", type="primary",
                         disabled=not recheck_asns, key="recheck_btn"):
                 with st.spinner("Reconciling..."):
-                    inv_full = pipeline.from_sheet_rows(gsheets.get_df("INVENTORY"))
-                    res = pipeline.auto_reconcile(
-                        inv_full, cfg_recon(), user=SS["user"] or "unknown",
-                        asns=recheck_asns, note="Re-check from Pending List",
-                        push_ax=True, make_email=False)
-                moved = res.get("ax_pushed") or []
-                still_held = [a for a in recheck_asns if a not in moved]
+                    moved, still_held = recheck_and_promote(
+                        recheck_asns, SS["user"] or "unknown")
                 if moved:
                     ui.celebrate(f"{len(moved)} ASN(s) moved to AX GRN",
                                 ", ".join(moved))
@@ -2070,6 +2083,31 @@ elif page == "AX GRN":
             o = disc_all[disc_all["STATUS"].astype(str).str.upper() == schema.D_OPEN]
             open_counts = o.groupby(o["ASN NO"].astype(str)).size().to_dict()
 
+        with st.expander(f"🔁 Re-check first ({len(blocked)} blocked) — "
+                         "no override needed if it now tallies", expanded=True):
+            st.caption(
+                "Re-runs reconciliation against the current Körber inventory. "
+                "Whatever now matches is pushed to AX GRN on its own, with no "
+                "override recorded. Only what's still short needs the form below.")
+            recheck_sel = st.multiselect(
+                "ASNs to re-check", blocked, key="ax_recheck_asns",
+                format_func=lambda a: (f"{a} — {open_counts.get(a, 0)} open "
+                                       f"discrepancy line(s)"))
+            if st.button("Re-check selected ASN(s)", key="ax_recheck_btn",
+                        disabled=not recheck_sel):
+                with st.spinner("Reconciling..."):
+                    moved, still_held = recheck_and_promote(
+                        recheck_sel, SS["user"] or "unknown")
+                if moved:
+                    ui.celebrate(f"{len(moved)} ASN(s) moved to AX GRN",
+                                ", ".join(moved))
+                if still_held:
+                    st.warning(f"**{len(still_held)} ASN(s) still blocked** — "
+                              "use the form below to send with an override, "
+                              "or resolve the discrepancy first.")
+                if moved or still_held:
+                    st.rerun()
+
         with st.form("override_push"):
             sel_o = st.multiselect(
                 "ASNs to send", blocked, key="ov_asns",
@@ -2186,6 +2224,12 @@ elif page == "Dashboard":
     if not holds.empty:
         st.caption(f"⚠ {len(holds)} open hold(s) in the pending register — "
                    "see the Pending List page.")
+    ax_all = gsheets.get_df("AX_GRN")
+    overridden = (ax_all[(ax_all["OVERRIDE"] == "Y") & (ax_all["AX GRN"] != schema.AX_DONE)]
+                 if not ax_all.empty and "OVERRIDE" in ax_all.columns else pd.DataFrame())
+    if not overridden.empty:
+        st.caption(f"⚠ {len(overridden)} ASN(s) sent to AX GRN with an "
+                   "outstanding discrepancy (override) — see the AX GRN page.")
 
     # ── report export — a utility, tucked away so it doesn't compete
     #    with the numbers above for attention ──
