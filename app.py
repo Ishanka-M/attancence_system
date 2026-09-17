@@ -1991,6 +1991,34 @@ elif page == "AX GRN":
             cols.insert(1, "📎 FILES")
         show(pick(view, cols))
 
+        if pipeline.pending_enabled():
+            with st.expander("🚩 Flag an AX System issue", expanded=False):
+                st.caption(
+                    "For an ASN stuck here because of a problem on the AX "
+                    "side (interface error, master data, approval, etc.) "
+                    "rather than a data issue. It shows up as the Hold "
+                    "Reason above, and clears itself the moment you mark "
+                    "that ASN's AX GRN done below — no separate step needed.")
+                ax_reasons = schema.PENDING_REASONS[schema.STAGE_AX]
+                fc1, fc2 = st.columns([1.3, 2])
+                flag_asns = fc1.multiselect(
+                    "ASN No", list(pend["ASN NO"].astype(str)), key="ax_flag_asns")
+                flag_reason = fc1.selectbox(
+                    "Reason", ax_reasons,
+                    index=ax_reasons.index("Interface error"), key="ax_flag_reason")
+                flag_remark = fc2.text_area(
+                    "Remark", height=80, key="ax_flag_remark",
+                    placeholder="What's wrong on the AX side, and who's fixing it")
+                if st.button("Flag selected ASN(s)", disabled=not flag_asns,
+                            key="ax_flag_btn"):
+                    for a in flag_asns:
+                        pipeline.raise_pending(
+                            a, schema.STAGE_AX, flag_reason, flag_remark,
+                            "High", SS["user"] or "unknown")
+                    st.success(f"{len(flag_asns)} ASN(s) flagged with an AX "
+                              "System issue.")
+                    st.rerun()
+
         ui.section("Mark as done in AX")
         c1, c2, c3 = st.columns([2, 1, 1])
         sel = c1.multiselect("ASNs", list(pend["ASN NO"].astype(str)))
