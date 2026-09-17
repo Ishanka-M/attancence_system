@@ -249,14 +249,14 @@ def _ws(sheet_key: str):
         if cfg.get("seed"):
             rows += [list(r) for r in cfg["seed"]]
         _update(ws, rows)
-        get_df.clear()
+        _fetch_df_cached.clear()
         return ws
 
     # fill in the header row if the existing sheet is blank
     try:
         if not any(str(c).strip() for c in api(ws.row_values, 1)):
             _update(ws, [headers])
-            get_df.clear()
+            _fetch_df_cached.clear()
     except Exception:
         pass
     return ws
@@ -312,7 +312,7 @@ def ensure_all(seed_masters: bool = True) -> tuple[list[str], list[str]]:
     except Exception:
         pass
 
-    get_df.clear()
+    _fetch_df_cached.clear()
     return created, patched
 
 
@@ -341,7 +341,7 @@ def ensure_missing_once() -> list[str]:
             created.append(cfg["title"])
             time.sleep(0.2)
         if created:
-            get_df.clear()
+            _fetch_df_cached.clear()
     except Exception:
         pass                      # never block start-up; _ws() creates on demand
     return created
@@ -400,8 +400,10 @@ def missing_columns() -> dict[str, list[str]]:
 
 # ───────────────────────── read / write ─────────────────────────
 @st.cache_data(ttl=90, show_spinner=False)
-def get_df(sheet_key: str) -> pd.DataFrame:
-    """Read a worksheet into a DataFrame (cached)."""
+@st.cache_data(ttl=90, show_spinner=False)
+def _fetch_df_cached(sheet_key: str) -> pd.DataFrame:
+    """The actual Sheets read, cached for 90s. May raise - get_df() below
+    is what every page actually calls, and never lets that escape."""
     cfg = schema.SHEETS.get(sheet_key)
     if cfg is None:
         # unknown to this build of schema.py - hand back nothing rather than
@@ -425,34 +427,80 @@ def get_df(sheet_key: str) -> pd.DataFrame:
     return df.reindex(columns=cfg["headers"])
 
 
+def get_df(sheet_key: str) -> pd.DataFrame:
+    """
+    Read a worksheet into a DataFrame. Never raises: a page that can't
+    currently reach Google Sheets (a network blip, a quota burst that
+    outlasts the retries above) gets an empty DataFrame back and shows its
+    own "nothing here" state instead of taking the whole app down with it.
+    The failure itself is never cached — cache_data only memoizes a
+    successful read — so the very next call tries again fresh rather than
+    staying stuck on "empty" for the rest of the cache window.
+    """
+    try:
+        return _fetch_df_cached(sheet_key)
+    except Exception as e:
+        with _lock:
+            _stats["errors"] += 1
+            _stats["last_error"] = f"{type(e).__name__}: {str(e)[:180]}"
+        cfg = schema.SHEETS.get(sheet_key)
+        st.warning(
+            f"Couldn't read **{sheet_key.replace('_', ' ').title()}** from "
+            f"Google Sheets just now ({type(e).__name__}) — showing it as "
+            f"empty. This usually clears up on its own; use 🔄 Data to "
+            f"retry.", icon="⚠️")
+        return pd.DataFrame(columns=cfg["headers"] if cfg else [])
+
+
 def refresh():
-    get_df.clear()
+    _fetch_df_cached.clear()
 
 
 def append_rows(sheet_key: str, rows: list[list]):
     if not rows:
         return
-    ws = _ws(sheet_key)
-    api(ws.append_rows,
-        [["" if v is None else str(v) for v in r] for r in rows],
-        value_input_option="USER_ENTERED")
-    get_df.clear()
+    try:
+        ws = _ws(sheet_key)
+        api(ws.append_rows,
+            [["" if v is None else str(v) for v in r] for r in rows],
+            value_input_option="USER_ENTERED")
+    except Exception as e:
+        with _lock:
+            _stats["errors"] += 1
+            _stats["last_error"] = f"{type(e).__name__}: {str(e)[:180]}"
+        st.error(
+            f"Couldn't save to **{sheet_key.replace('_', ' ').title()}** "
+            f"right now ({type(e).__name__}) — nothing was written. "
+            f"Try again in a moment.")
+        st.stop()
+    _fetch_df_cached.clear()
 
 
 def overwrite(sheet_key: str, df: pd.DataFrame):
     """Clear the sheet and rewrite it from the DataFrame."""
-    cfg = _require(sheet_key)
-    ws = _ws(sheet_key)
-    df = df.reindex(columns=cfg["headers"]).fillna("")
-    body = [cfg["headers"]] + df.astype(str).values.tolist()
-    need_rows, need_cols = len(body) + 50, len(cfg["headers"])
-    if ws.row_count < need_rows:
-        api(ws.add_rows, need_rows - ws.row_count)
-    if ws.col_count < need_cols:
-        api(ws.add_cols, need_cols - ws.col_count)
-    api(ws.clear)
-    _update(ws, body)
-    get_df.clear()
+    try:
+        cfg = _require(sheet_key)
+        df = df.reindex(columns=cfg["headers"]).fillna("")
+        body = [cfg["headers"]] + df.astype(str).values.tolist()
+        ws = _ws(sheet_key)
+        need_rows, need_cols = len(body) + 50, len(cfg["headers"])
+        if ws.row_count < need_rows:
+            api(ws.add_rows, need_rows - ws.row_count)
+        if ws.col_count < need_cols:
+            api(ws.add_cols, need_cols - ws.col_count)
+        api(ws.clear)
+        _update(ws, body)
+    except Exception as e:
+        with _lock:
+            _stats["errors"] += 1
+            _stats["last_error"] = f"{type(e).__name__}: {str(e)[:180]}"
+        st.error(
+            f"Couldn't save to **{sheet_key.replace('_', ' ').title()}** "
+            f"right now ({type(e).__name__}). If the sheet was already "
+            f"cleared before this happened it may be temporarily empty — "
+            f"use 🔄 Data and try the save again.")
+        st.stop()
+    _fetch_df_cached.clear()
 
 
 def upsert(sheet_key: str, rows: list[dict]) -> tuple[int, int]:

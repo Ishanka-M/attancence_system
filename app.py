@@ -1574,6 +1574,45 @@ elif page == "Pending List":
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 width="stretch")
 
+    # ── issue resolved? re-check and move it into the AX GRN queue ──
+    korber_open = openp[openp["STAGE"] == schema.STAGE_KORBER] \
+        if not openp.empty else openp
+    if not korber_open.empty:
+        with st.expander(
+            f"🔁 Re-check and move to AX GRN ({len(korber_open)} held at "
+            "Körber GRN)", expanded=False):
+            st.caption(
+                "Re-runs reconciliation for the ASN(s) you pick against the "
+                "current Körber inventory. If every line now matches, the "
+                "hold is cleared and the ASN moves into the AX GRN queue "
+                "on its own - nothing is forced through.")
+            recheck_asns = st.multiselect(
+                "ASN No", sorted(korber_open["ASN NO"].astype(str).unique()),
+                key="recheck_asns")
+            if st.button("Re-check selected ASN(s)", type="primary",
+                        disabled=not recheck_asns, key="recheck_btn"):
+                with st.spinner("Reconciling..."):
+                    inv_full = pipeline.from_sheet_rows(gsheets.get_df("INVENTORY"))
+                    res = pipeline.auto_reconcile(
+                        inv_full, cfg_recon(), user=SS["user"] or "unknown",
+                        asns=recheck_asns, note="Re-check from Pending List",
+                        push_ax=True, make_email=False)
+                moved = res.get("ax_pushed") or []
+                still_held = [a for a in recheck_asns if a not in moved]
+                if moved:
+                    ui.celebrate(f"{len(moved)} ASN(s) moved to AX GRN",
+                                ", ".join(moved))
+                if still_held:
+                    still_reasons = pipeline.pending_remarks()
+                    lines = [f"- **{a}**: {still_reasons.get(clean(a), 'still short of a full match')}"
+                             for a in still_held]
+                    st.warning(
+                        f"**{len(still_held)} ASN(s) not moved** — still not "
+                        "fully matched, so the hold stays open:\n\n"
+                        + "\n".join(lines))
+                if moved or still_held:
+                    st.rerun()
+
     ui.section("Finalize summary report",
                "Pending, discrepancies and completed ASNs in one workbook.")
     st.download_button(
