@@ -192,6 +192,7 @@ def pipeline_strip(stages):
 SS = st.session_state
 SS.setdefault("user", "")
 SS.setdefault("role", "user")
+SS.setdefault("access_level", None)          # None | "dashboard" | "central"
 SS.setdefault("parsed_asn", {})
 SS.setdefault("inv_df", None)
 SS.setdefault("inv_note", "")
@@ -200,6 +201,66 @@ SS.setdefault("recon", None)         # last manual reconciliation result
 SS.setdefault("email", None)
 SS.setdefault("backup", None)
 SS.setdefault("drive_diag", None)
+
+# Pages the restricted "Dashboard" login can see. Central System sees
+# everything, unrestricted.
+RESTRICTED_PAGES = ["Dashboard", "Pending List", "Discrepancies",
+                     "Attachments", "Search"]
+CENTRAL_PASSWORD = "123456"
+
+# ───────────────────────────── login gate ─────────────────────────────
+if SS["access_level"] is None:
+    st.markdown(f"""
+    <style>
+      .block-container {{ padding-top: 3.5rem; }}
+      .login-card {{
+          background: {ui.SURFACE}; border: 1px solid {ui.LINE};
+          border-radius: 14px; padding: 2rem 2.2rem 1.6rem 2.2rem;
+          max-width: 380px; margin: 2rem auto 0 auto;
+      }}
+      .login-mark {{
+          width: 44px; height: 44px; border-radius: 10px;
+          background: linear-gradient(135deg, {ACCENT}, {ui.ACCENT_2});
+          color: #04211d; font-weight: 800; font-size: 1.05rem;
+          display: flex; align-items: center; justify-content: center;
+          margin: 0 auto .9rem auto;
+      }}
+      .login-title {{ text-align: center; font-size: 1.05rem; font-weight: 700;
+          color: {INK}; margin-bottom: .15rem; }}
+      .login-sub {{ text-align: center; font-size: .8rem; color: {MUTED};
+          margin-bottom: 1.3rem; }}
+    </style>
+    <div class="login-card-wrap">
+      <div class="login-mark">GRN</div>
+      <div class="login-title">ASN / GRN Control</div>
+      <div class="login-sub">Sign in to continue</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    _, mid, _ = st.columns([1, 1.3, 1])
+    with mid:
+        choice = st.radio("Login as", ["Dashboard", "Central System"],
+                          horizontal=True, label_visibility="collapsed")
+        if choice == "Central System":
+            pw = st.text_input("Password", type="password",
+                               placeholder="Password", label_visibility="collapsed")
+            if st.button("Log in", type="primary", use_container_width=True,
+                        key="login_central"):
+                if pw == CENTRAL_PASSWORD:
+                    SS["access_level"] = "central"
+                    SS["role"] = "admin"
+                    st.rerun()
+                else:
+                    st.error("Incorrect password.")
+            st.caption("Full access to every page.")
+        else:
+            if st.button("Log in", type="primary", use_container_width=True,
+                        key="login_dashboard"):
+                SS["access_level"] = "dashboard"
+                st.rerun()
+            st.caption("Dashboard, Pending List, Discrepancies, "
+                       "Attachments and Search only.")
+    st.stop()
 
 
 def cfg_recon() -> dict:
@@ -234,8 +295,14 @@ GROUPS = [
                    "Discrepancies", "Attachments", "Email", "Search"]),
     ("⚙️ Admin", ["Setup", "Data Manager", "Maintenance"]),
 ]
+if SS["access_level"] == "dashboard":
+    GROUPS = [(label, [p for p in pages if p in RESTRICTED_PAGES])
+              for label, pages in GROUPS]
+    GROUPS = [(label, pages) for label, pages in GROUPS if pages]
 PAGES = [p for _, group in GROUPS for p in group]
 SS.setdefault("page", "Dashboard")
+if SS["page"] not in PAGES:
+    SS["page"] = "Dashboard"
 
 # ═══════════════════════════════════════════════════════════════════
 #  TOP NAVIGATION BAR
@@ -410,7 +477,7 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
-pc1, pc2, pc3, pc4, pc_sp = st.columns([1.1, 1.1, 1, 1.2, 3])
+pc1, pc2, pc3, pc4, pc5, pc_sp = st.columns([1.1, 1.1, 1, 1.2, 1, 2])
 
 with pc1:
     with st.popover("👤 Operator", use_container_width=True):
@@ -437,6 +504,7 @@ with pc3:
 
 with pc4:
     with st.popover("ℹ️ Status", use_container_width=True):
+        st.markdown(f"**Login:** {'Central System' if SS['access_level'] == 'central' else 'Dashboard'}")
         st.markdown(f"**Operator:** {SS['user'] or 'not set'}")
         st.markdown(f"**Access:** {'admin' if SS['role'] == 'admin' else 'standard'}")
         _st = gsheets.api_stats()
@@ -447,6 +515,12 @@ with pc4:
             st.markdown(f"[Open Google Sheet]({_url})")
         if _new_tabs:
             st.info(f"✅ Created sheets: {', '.join(_new_tabs)}")
+
+with pc5:
+    if st.button("🚪 Log out", key="logout_btn", use_container_width=True):
+        SS["access_level"] = None
+        SS["role"] = "user"
+        st.rerun()
 
 # Navigation — 4 category buttons; clicking one drops down that category's
 # pages below it, like a real dropdown menu. Picking a page closes the
@@ -1602,10 +1676,66 @@ elif page == "Attachments":
         st.stop()
 
     att = gsheets.get_df("ATTACHMENTS")
+    summ = gsheets.get_df("ASN_SUMMARY")
+
+    # ── ASNs with no attachment at all — add one right here ──
+    att_asns = set(att["ASN NO"].astype(str).map(clean)) if not att.empty else set()
+    all_asns = sorted({clean(a) for a in summ["ASN NO"].astype(str) if clean(a)}) \
+        if not summ.empty else []
+    missing_asns = [a for a in all_asns if a not in att_asns]
+
+    ui.section("ASNs without an attachment",
+              f"{len(missing_asns)} ASN(s) have no photo, PDF or Excel file "
+              "on file yet" if missing_asns else
+              "Every ASN has at least one attachment", 1)
+    if missing_asns:
+        with st.expander(f"⚠ {len(missing_asns)} ASN(s) missing an attachment "
+                         "— add one here", expanded=att.empty):
+            mc1, mc2 = st.columns([1, 2])
+            with mc1:
+                pick_asn = st.selectbox("ASN No", missing_asns, key="missing_asn_pick")
+                pick_inv = st.text_input("Invoice Number (optional)",
+                                         key="missing_asn_inv")
+            with mc2:
+                pick_files = st.file_uploader(
+                    "Photos, scanned invoice, delivery note, packing list, etc.",
+                    type=["jpg", "jpeg", "png", "webp", "pdf", "xlsx", "xls", "xlsm"],
+                    accept_multiple_files=True, key="missing_asn_files")
+            if st.button("Upload attachment(s)", type="primary",
+                        disabled=not pick_files, key="missing_asn_upload"):
+                ts, user = now_str(), SS["user"] or "unknown"
+                up_rows, failed = [], []
+                for f in pick_files:
+                    b = f.getvalue()
+                    ftype = attach_file_type(f.name)
+                    try:
+                        key = storage.object_key(pick_asn, f.name)
+                        if ftype in ("PDF", "EXCEL"):
+                            url, _ = storage.upload_compressed(b, key, f.type)
+                        else:
+                            url = storage.upload(b, key, f.type)
+                        up_rows.append({
+                            "ATTACH ID": uuid.uuid4().hex[:10].upper(),
+                            "ASN NO": pick_asn, "INVOICE NUMBER": clean(pick_inv),
+                            "FILE NAME": f.name, "FILE TYPE": ftype, "FILE URL": url,
+                            "SIZE KB": round(len(b) / 1024, 1),
+                            "UPLOADED AT": ts, "UPLOADED BY": user, "NOTE": "",
+                        })
+                    except Exception as e:
+                        failed.append(f"{f.name}: {e}")
+                if up_rows:
+                    gsheets.upsert("ATTACHMENTS", up_rows)
+                    ui.celebrate(f"{len(up_rows)} file(s) added",
+                                f"ASN {pick_asn}")
+                if failed:
+                    st.error("Some files failed to upload:\n\n"
+                             + "\n".join(f"- {x}" for x in failed))
+                if up_rows:
+                    st.rerun()
+
     if att.empty:
         ui.empty("📎", "No attachments yet",
-                 "Upload a photo or PDF against an ASN from the "
-                 "ASN Upload page — it will show up here.")
+                 "Pick an ASN above to add the first one.")
         st.stop()
 
     a, b, c = st.columns(3)
@@ -1613,7 +1743,7 @@ elif page == "Attachments":
     kpi(b, att["ASN NO"].astype(str).str.strip().nunique(), "ASN No covered")
     kpi(c, fmt_num(att["SIZE KB"].map(to_num).sum() / 1024), "Total size (MB)")
 
-    ui.section("Find a file", "Search by ASN No, Invoice Number or file name.")
+    ui.section("Find a file", "Search by ASN No, Invoice Number or file name.", 2)
     q1, q2, q3 = st.columns([2, 1, 1])
     q = q1.text_input("Search", placeholder="e.g. ASN-10234, INV-9981 or photo.jpg",
                       label_visibility="collapsed")
